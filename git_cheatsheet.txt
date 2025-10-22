@@ -1,0 +1,22 @@
+### First time
+git clone https://github.com/rileyhitthefan/bat-lab.git
+
+### Add features
+Create new: git checkout -b branch-name
+
+### Push features (Always pull and resolve conflicts before commiting)
+git pull 
+
+Add all changes: git add .
+
+Add some changes: git add loc/to/file
+
+git commit -m "Some commit message"
+
+git push --set-upstream origin branch-name
+
+After this, go to github, select pushed branch and create pull request
+
+### Pull features
+git switch branch-name (usualy branch-name=main)
+git pull
