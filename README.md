@@ -2,6 +2,7 @@
 
 Code for detecting and classifying bat echolocation calls and identifying behavioral sequences
 
+```
 bat-lab/
 ├── app.py                          # UI entry point
 │
@@ -26,4 +27,4 @@ bat-lab/
 ├── setup.py
 ├── README.md
 └── .gitignore
-
+```
