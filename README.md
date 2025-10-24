@@ -19,9 +19,18 @@ bat-lab/
 │   │   └── model.py                # ML logic
 │   │
 │   └── static/                     
-│       ├── uploads/                # Temporary uploaded .wav files
-│       ├── results/                # Model output files
-│       └── data/                   # Reference/training data
+│   │   ├── uploads/                # Temporary uploaded .wav files
+│   │   ├── results/                # Model output files
+│   │   └── data/                  # Reference/training data
+│   │
+│   └── db/
+│       ├── __init__.py
+│       ├── connection.py      # Database connection setup
+│       └── queries.py         # DB access endpoints
+│
+├── config/
+│   ├── __init__.py
+│   └── settings.py            # Loads env vars, MySQL credentials
 │
 ├── requirements.txt
 ├── setup.py
