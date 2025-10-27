@@ -2,7 +2,26 @@ from skimage import filters
 import numpy as np
 from skimage.util.shape import view_as_windows
 from scipy.ndimage import zoom
+import matplotlib.pyplot as plt
+from scipy.io import wavfile
 
+def create_sonogram(filepath: str) -> str:
+    # Create and save a spectrogram (sonogram) image from a .wav file.
+    rate, data = wavfile.read(filepath)
+    if data.ndim > 1:  # Convert stereo → mono
+        data = np.mean(data, axis=1)
+
+    # Generate and process spectrogram
+    spec = gen_spectrogram(data, rate, 0.02, 0.5)
+    spec = process_spectrogram(spec)
+
+    # Save sonogram
+    sonogram_path = filepath.replace(".wav", "_sonogram.png")
+    plt.imshow(spec, aspect="auto", origin="lower")
+    plt.axis("off")
+    plt.savefig(sonogram_path, bbox_inches="tight", pad_inches=0)
+    plt.close()
+    return sonogram_path
 
 def denoise(spec_noisy: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
     """

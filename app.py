@@ -1,13 +1,15 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from io import BytesIO
+from scipy.io import wavfile
 import time
 
 # ============================================================================
 # PAGE CONFIGURATION
 # ============================================================================
 # Set the page layout to wide mode for better space utilization
-st.set_page_config(page_title="Bat Acoustic Identification", layout="wide")
+st.set_page_config(page_title="Bat Lab", layout="wide")
 
 # Hide only the "Show/hide columns" button in st.dataframe/st.data_editor toolbars
 st.markdown("""
@@ -62,12 +64,29 @@ if 'unknown_data' not in st.session_state:
 
 if 'uploaded_files' not in st.session_state:
     st.session_state.uploaded_files = []
-
-
+    
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
 
+@st.cache_resource
+def cache_wav_file(file_name: str, file_bytes: bytes):
+    """
+    Cache WAV file in memory for temporary processing.
+    
+    Args:
+        file_name: Name of uploaded file.
+        file_bytes: File contents.
+    Returns:
+        (file_name, sample_rate, audio_data)
+    """
+    buffer = BytesIO(file_bytes)
+    sampling_rate, audio_data = wavfile.read(buffer)
+    if audio_data.ndim > 1:
+        audio_data = np.mean(audio_data, axis=1)
+    return file_name, sampling_rate, audio_data
+
+@st.cache_data
 def process_audio_files(uploaded_files):
     """
     Process uploaded audio files and classify them as KNOWN or UNKNOWN.
@@ -85,19 +104,17 @@ def process_audio_files(uploaded_files):
     unknown_results = []
 
     # Iterate through each uploaded file
-    for file in uploaded_files:
-        # Get the filename
-        filename = file.name
+    for file_data in uploaded_files:
+        file_name, sampling_rate, audio_data = file_data
 
         # ====================================================================
         # MODEL INTEGRATION POINT
         # ====================================================================
         # TODO: Replace this section with your actual ML model prediction
         # Example integration:
-        # 1. Load the audio file: audio_data = load_audio(file)
-        # 2. Extract features: features = extract_features(audio_data)
-        # 3. Make prediction: species, confidence = model.predict(features)
-        # 4. Set threshold: if confidence > threshold, add to known, else unknown
+        # 1. Extract features: features = extract_features(audio_data)
+        # 2. Make prediction: species, confidence = model.predict(features)
+        # 3. Set threshold: if confidence > threshold, add to known, else unknown
 
         # Placeholder logic for demonstration
         # This simulates model predictions with dummy data
@@ -116,14 +133,14 @@ def process_audio_files(uploaded_files):
             predicted_species = random.choice(species_list)
 
             known_results.append({
-                'FileName': filename,
+                'FileName': file_name,
                 'SpeciesPrediction': predicted_species,
                 'ConfidenceLevel': f"{confidence * 100:.2f}%"
             })
         else:
             # Low confidence - add to UNKNOWN category
             unknown_results.append({
-                'FileName': filename
+                'FileName': file_name
             })
 
     # Convert results to DataFrames
@@ -169,8 +186,13 @@ uploaded_files = st.file_uploader(
 
 # Display number of uploaded files
 if uploaded_files:
+    for file in uploaded_files:
+        # Check if file already cached in session state
+        if file.name not in [f[0] for f in st.session_state["uploaded_files"]]:
+            file_name, sampling_rate, audio_data = cache_wav_file(file.name, file.getvalue())
+            st.session_state["uploaded_files"].append((file_name, sampling_rate, audio_data))
     st.info(f"📁 {len(uploaded_files)} file(s) uploaded")
-    st.session_state.uploaded_files = uploaded_files
+    uploaded_files = st.session_state["uploaded_files"]
 
 st.markdown("---")
 
@@ -230,7 +252,7 @@ if add_detector_button:
 if add_species_button:
     st.session_state.show_add_species = True
 
-#Detector input form (shown when toggled)
+# Detector input form (shown when toggled)
 if st.session_state.show_add_detector:
     st.markdown("### ➕ Register a New Sound Detector")
     with st.form("add_detector_form", clear_on_submit=False):
