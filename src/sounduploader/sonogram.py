@@ -1,75 +1,31 @@
-from skimage import filters
+from scipy.io import wavfile
+from scipy import signal
 import numpy as np
-from skimage.util.shape import view_as_windows
-from scipy.ndimage import zoom
+import matplotlib.pyplot as plt
+from skimage import filters
 
-
-def denoise(spec_noisy: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
-    """
-    Denoise a spectrogram by subtracting the mean energy per frequency band.
-
-    Parameters
-    ----------
-    spec_noisy : np.ndarray
-        Noisy spectrogram.
-    mask : np.ndarray | None
-        Boolean mask for selecting relevant time steps (optional).
-
-    Returns
-    -------
-    np.ndarray
-        Denoised spectrogram with negative values clipped to zero.
-    """
-    if mask is None:
-        me = np.mean(spec_noisy, 1)
-        spec_denoise = spec_noisy - me[:, np.newaxis]
-    else:
-        mask_inv = np.invert(mask)
-        spec_denoise = spec_noisy.copy()
-        if np.sum(mask) > 0:
-            me = np.mean(spec_denoise[:, mask], 1)
-            spec_denoise[:, mask] -= me[:, np.newaxis]
-        if np.sum(mask_inv) > 0:
-            me_inv = np.mean(spec_denoise[:, mask_inv], 1)
-            spec_denoise[:, mask_inv] -= me_inv[:, np.newaxis]
-    spec_denoise.clip(min=0, out=spec_denoise)
-    return spec_denoise
-
-
-def gen_mag_spectrogram(x: np.ndarray, fs: float, ms: float, overlap_perc: float) -> tuple[np.ndarray, int]:
-    """
-    Compute the magnitude spectrogram.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        Audio samples.
-    fs : float
-        Sampling rate (Hz).
-    ms : float
-        Window length in seconds.
-    overlap_perc : float
-        Fraction of overlap between windows (0–1).
-
-    Returns
-    -------
-    tuple[np.ndarray, int]
-        Magnitude spectrogram (freq × time) and number of FFT windows.
-    """
+def gen_mag_spectrogram_fixed(x: np.ndarray, fs: float, ms: float, overlap_perc: float):
+    """Compute the magnitude spectrogram with proper normalization."""
+    x = x.astype(np.float64)
+    
     nfft = int(ms * fs)
     noverlap = int(overlap_perc * nfft)
     step = nfft - noverlap
-    shape = (nfft, (x.shape[-1] - noverlap) // step)
-    strides = (x.strides[0], step * x.strides[0])
-    x_wins = np.lib.stride_tricks.as_strided(x, shape=shape, strides=strides)
-    x_wins_han = np.hanning(x_wins.shape[0])[..., np.newaxis] * x_wins
-    complex_spec = np.fft.rfft(x_wins_han, axis=0)
-    mag_spec = (np.conjugate(complex_spec) * complex_spec).real
-    spec = np.flipud(mag_spec[1:, :])
-    return spec, x_wins.shape[0]
+    
+    freqs, times, Sxx = signal.spectrogram(
+        x, 
+        fs=fs,
+        window='hann',
+        nperseg=nfft,
+        noverlap=noverlap,
+        scaling='density'
+    )
+    
+    mag_spec = np.flipud(Sxx)
+    return mag_spec, nfft
 
 
-def gen_spectrogram(
+def gen_spectrogram_fixed(
     audio_samples: np.ndarray,
     sampling_rate: int,
     fft_win_length: float,
@@ -78,74 +34,115 @@ def gen_spectrogram(
     max_freq: int = 256,
     min_freq: int = 0,
 ) -> np.ndarray:
-    """
-    Generate a log-scaled magnitude spectrogram.
-
-    Parameters
-    ----------
-    audio_samples : np.ndarray
-        Raw audio waveform.
-    sampling_rate : int
-        Sampling rate (Hz).
-    fft_win_length : float
-        FFT window size (s).
-    fft_overlap : float
-        Overlap percentage between windows (0–1).
-    crop_spec : bool, default=True
-        Whether to apply a band-pass crop.
-    max_freq : int, default=256
-        Max frequency band index.
-    min_freq : int, default=0
-        Min frequency band index.
-
-    Returns
-    -------
-    np.ndarray
-        Log-scaled magnitude spectrogram.
-    """
-    spec, x_win_len = gen_mag_spectrogram(audio_samples, sampling_rate, fft_win_length, fft_overlap)
+    """Generate a log-scaled magnitude spectrogram."""
+    spec, x_win_len = gen_mag_spectrogram_fixed(audio_samples, sampling_rate, fft_win_length, fft_overlap)
+    
+    # Apply log scaling
+    spec_log = np.log10(spec + 1e-10)
+    
     if crop_spec:
-        freq = abs(np.fft.rfftfreq(x_win_len) * sampling_rate)
-        freq = np.flip(freq)
-        spec = spec[-max_freq:-min_freq, :]
-        req_height = max_freq - min_freq
-        if spec.shape[0] < req_height:
-            pad = np.zeros((req_height - spec.shape[0], spec.shape[1]))
-            spec = np.vstack((pad, spec))
-    log_scaling = 2.0 * (1.0 / sampling_rate) * (
-        1.0 / (np.abs(np.hanning(int(fft_win_length * sampling_rate))) ** 2).sum()
-    )
-    return np.log(1.0 + log_scaling * spec)
+        spec_log = spec_log[min_freq:max_freq, :]
+    
+    return spec_log
 
 
-def process_spectrogram(
+def denoise_aggressive(spec_noisy: np.ndarray, percentile: float = 25) -> np.ndarray:
+    """
+    Aggressive denoising by subtracting noise floor estimated from low percentile.
+    """
+    # Estimate noise floor from each frequency band
+    noise_floor = np.percentile(spec_noisy, percentile, axis=1, keepdims=True)
+    spec_denoise = spec_noisy - noise_floor
+    spec_denoise = np.clip(spec_denoise, 0, None)
+    return spec_denoise
+
+
+def process_spectrogram_fixed(
     spec: np.ndarray,
     denoise_spec: bool = True,
-    mean_log_mag: float = 0.5,
     smooth_spec: bool = True,
+    enhance_contrast: bool = True,
 ) -> np.ndarray:
-    """
-    Optionally denoise and smooth a log-magnitude spectrogram.
+    """Denoise, smooth, and enhance spectrogram."""
+    if denoise_spec:
+        # Aggressive noise floor subtraction
+        spec = denoise_aggressive(spec, percentile=20)
+    
+    if smooth_spec:
+        # Light Gaussian smoothing
+        spec = filters.gaussian(spec, sigma=0.5)
+    
+    if enhance_contrast:
+        # Morphological operations to enhance isolated peaks (bat calls)
+        from skimage import morphology
+        # Enhance vertical structures (frequency continuity)
+        spec = filters.median(spec, footprint=morphology.rectangle(3, 1))
+    
+    return spec
 
+
+def create_sonogram(filepath: str, include_axes: bool = True, mode: str = 'bat', hp_cutoff: int = 2000) -> str:
+    """
+    Create and save a spectrogram optimized for bat detection.
+    
     Parameters
     ----------
-    spec : np.ndarray
-        Input spectrogram.
-    denoise_spec : bool, default=True
-        Apply mean-based denoising.
-    mean_log_mag : float, default=0.5
-        Threshold for silence masking.
-    smooth_spec : bool, default=True
-        Apply Gaussian smoothing.
-
-    Returns
-    -------
-    np.ndarray
-        Cleaned and smoothed spectrogram.
+    filepath : str
+        Path to .wav file
+    include_axes : bool
+        If True, include frequency/time axes and colorbar
+    mode : str
+        'standard' - full spectrogram (0-250 freq bins)
+        'bats' - optimized for bat echolocation (100-1000 freq bins, 5ms window)
+    hp_cutoff : int
+        High-pass filter cutoff in Hz (default 2000). Set to 0 to disable.
     """
-    if denoise_spec:
-        mask = spec.mean(0) > mean_log_mag
-        spec = denoise(spec, mask)
-    if smooth_spec:
-        spec = filters.gaussian(spec, 1.0)
-    return spec
+    rate, data = wavfile.read(filepath)
+    if data.ndim > 1:
+        data = np.mean(data, axis=1)
+
+    # High-pass filter to remove low-frequency noise
+    if hp_cutoff > 0:
+        sos = signal.butter(4, hp_cutoff, 'hp', fs=rate, output='sos')
+        data = signal.sosfilt(sos, data)
+
+    # Adjust parameters based on mode
+    if mode == 'bats':
+        fft_win = 0.005
+        overlap = 0.75
+        max_freq = 1000
+        min_freq = 100
+    else:
+        fft_win = 0.02
+        overlap = 0.5
+        max_freq = 256
+        min_freq = 0
+
+    # Generate spectrogram
+    spec = gen_spectrogram_fixed(data, rate, fft_win, overlap, max_freq=max_freq, min_freq=min_freq)
+    spec = process_spectrogram_fixed(spec)
+
+    # Percentile-based normalization
+    p25 = np.percentile(spec, 25)
+    p95 = np.percentile(spec, 95)
+    spec_normalized = np.clip((spec - p25) / (p95 - p25 + 1e-10), 0, 1)
+
+    # Save
+    sonogram_path = filepath.replace(".wav", f"_sonogram_{mode}.png")
+    
+    if include_axes:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        im = ax.imshow(spec_normalized, aspect="auto", origin="lower", cmap='viridis')
+        cbar = plt.colorbar(im, ax=ax, label='Normalized Intensity')
+        ax.set_xlabel('Time (frames)')
+        ax.set_ylabel('Frequency (bins)')
+        ax.set_title(f'Spectrogram ({mode} mode)')
+        plt.tight_layout()
+    else:
+        plt.figure()
+        plt.imshow(spec_normalized, aspect="auto", origin="lower", cmap='viridis')
+        plt.axis("off")
+    
+    plt.savefig(sonogram_path, bbox_inches="tight", pad_inches=0, dpi=100)
+    plt.close()
+    return sonogram_path
