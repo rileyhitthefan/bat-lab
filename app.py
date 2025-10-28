@@ -242,15 +242,6 @@ if st.session_state.show_add_detector:
         with col_lon:
             lon_str = st.text_input("Longitude (−180 to 180) *", placeholder="e.g., -86.9212")
 
-        # NEW: optional City/Country fields
-        col_cty, col_state = st.columns(2)
-        with col_cty:
-            county = st.text_input("City (optional)", placeholder="e.g., Johannesburg")
-        with col_state:
-            state = st.text_input("Country (optional)", placeholder="e.g., South Africa")
-
-        notes = st.text_area("Notes (optional)", placeholder="Any additional info…")
-
         submitted = st.form_submit_button("💾 Save Detector", use_container_width=True)
         if submitted:
             errors = []
@@ -282,9 +273,6 @@ if st.session_state.show_add_detector:
                     "Detector": name,
                     "Latitude": lat,
                     "Longitude": lon,
-                    "County": (county or "").strip(),
-                    "State": (state or "").strip(),
-                    "Notes": notes,
                 })
                 st.session_state.show_add_detector = False
                 st.success("✅ New detector saved.")
