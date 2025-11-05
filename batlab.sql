@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS `Locations` (
   `area_name` VARCHAR(45) NOT NULL,
   `latitude` DECIMAL(6,3) NOT NULL,
   `longitude` DECIMAL(6,3) NOT NULL,
-  PRIMARY KEY (`area_name`),
+  PRIMARY KEY (`idlocation`),
   UNIQUE INDEX `area_name_UNIQUE` (`area_name` ASC)
 ) ENGINE=InnoDB;
 
