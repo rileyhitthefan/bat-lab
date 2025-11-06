@@ -19,10 +19,6 @@ CONFIG = {
     "fmin": 1000,
     "fmax": 24000,
 }
-CLASS_NAMES = [
-    "RHICAP",
-    "NYCTHE",
-]
 
 st.set_page_config(page_title="Bat Lab", layout="wide")
 
@@ -71,18 +67,20 @@ def cache_wav_file(file_name: str, file_bytes: bytes):
 def load_model():
     from src.classifier.SmallAudioCNN import SmallAudioCNN
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     checkpoint = torch.load(MODEL_PATH, map_location=device)
-    if "meta" in checkpoint:
-        num_species = len(checkpoint["meta"]["species"])
-        num_locations = len(checkpoint["meta"]["locations"])
-    else:
-        num_species = 1
-        num_locations = 2
+
+    # Load metadata (species, locations, etc.)
+    meta = checkpoint.get("meta", {})
+    num_species = len(meta.get("species", [])) or 1
+    num_locations = len(meta.get("locations", [])) or 2
+
     model = SmallAudioCNN(num_species, num_locations).to(device)
     state_dict = checkpoint["model_state"] if "model_state" in checkpoint else checkpoint
     model.load_state_dict(state_dict)
     model.eval()
-    return model, device
+
+    return model, meta, device
 
 @st.cache_data
 def process_audio_files(cached_files):
@@ -96,7 +94,7 @@ def process_audio_files(cached_files):
     Returns:
         known_df, unknown_df: pandas DataFrames with classification results
     """
-    model, device = load_model()
+    model, meta, device = load_model()
     known_results = []
     unknown_results = []
 
@@ -129,9 +127,10 @@ def process_audio_files(cached_files):
             probs = F.softmax(logits, dim=1)
             conf, pred_idx = torch.max(probs, dim=1)
             confidence = conf.item()
-            predicted_species = CLASS_NAMES[pred_idx.item()]
+            predicted_species = meta["species"][pred_idx.item()]
+            print(meta)
 
-        confidence_threshold = 0.75
+        confidence_threshold = 0.5
         if confidence >= confidence_threshold:
             known_results.append({
                 "FileName": file_name,
@@ -159,6 +158,11 @@ uploaded_files = st.file_uploader(
     key='file_uploader'
 )
 if uploaded_files:
+    # remove cached files that are no longer uploaded
+    st.session_state["uploaded_files"] = [
+        f for f in st.session_state["uploaded_files"]
+        if f[0] in [file.name for file in uploaded_files]
+    ]
     for file in uploaded_files:
         if file.name not in [f[0] for f in st.session_state["uploaded_files"]]:
             file_name, sampling_rate, audio_data = cache_wav_file(file.name, file.read())
