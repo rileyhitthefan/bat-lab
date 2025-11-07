@@ -29,32 +29,32 @@ CREATE TABLE IF NOT EXISTS `Bats` (
 -- Location_Bats table
 CREATE TABLE IF NOT EXISTS `Location_Bats` (
   `id` INT NOT NULL AUTO_INCREMENT,
-  `bat_id` INT NOT NULL,
-  `location_id` INT NOT NULL,
+  `bat_abreviation` VARCHAR(45) NOT NULL,
+  `location_name` VARCHAR(45) NOT NULL,
   `lowest_frequency` INT NULL,
   `highest_frequency` INT NULL,
   `shape` BLOB NULL,
   PRIMARY KEY (`id`),
-  UNIQUE INDEX `bat_location_unique` (`bat_id`, `location_id`),
-  INDEX `location_idx` (`location_id`),
-  INDEX `bat_idx` (`bat_id`),
-  CONSTRAINT `fk_bat` FOREIGN KEY (`bat_id`)
-    REFERENCES `Bats` (`idBats`) ON DELETE NO ACTION ON UPDATE NO ACTION,
-  CONSTRAINT `fk_location` FOREIGN KEY (`location_id`)
-    REFERENCES `Locations` (`idlocation`) ON DELETE NO ACTION ON UPDATE NO ACTION
+  UNIQUE INDEX `bat_location_unique` (`bat_abreveation`, `location_name`),
+  INDEX `location_idx` (`location_name`),
+  INDEX `bat_idx` (`bat_abreveation`),
+  CONSTRAINT `fk_bat` FOREIGN KEY (`bat_abreveation`)
+    REFERENCES `Bats` (`abreveation`) ON DELETE NO ACTION ON UPDATE NO ACTION,
+  CONSTRAINT `fk_location` FOREIGN KEY (`location_name`)
+    REFERENCES `Locations` (`area_name`) ON DELETE NO ACTION ON UPDATE NO ACTION
 ) ENGINE=InnoDB;
 
 -- Call_Library table
 CREATE TABLE IF NOT EXISTS `Call_Library` (
-  `idTraining` INT NOT NULL,
-  `files` BLOB NULL,
-  `bat` INT NULL,
-  `location` INT NULL,
+  `idTraining` INT NOT NULL auto_increment,
+  `files` BLOB NOT NULL,
+  `bat_name` VARCHAR(45)  NOT NULL,
+  `location_name` VARCHAR(45)  NOT NULL,
   PRIMARY KEY (`idTraining`),
   UNIQUE INDEX `idTraining_UNIQUE` (`idTraining` ASC),
   INDEX `Bat_idx` (`bat`, `location`),
-  CONSTRAINT `Bat_location_fk` FOREIGN KEY (`bat`, `location`)
-    REFERENCES `Location_Bats` (`bat_id`, `location_id`)
+  CONSTRAINT `Bat_location_fk` FOREIGN KEY (`bat_name`, `location_name`)
+    REFERENCES `Location_Bats` (`bat_abreveation`, `location_name`)
     ON DELETE NO ACTION ON UPDATE NO ACTION
 ) ENGINE=InnoDB;
 
