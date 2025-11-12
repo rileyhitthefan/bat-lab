@@ -8,7 +8,7 @@ import time
 import torch
 import torch.nn.functional as F
 
-MODEL_PATH = "src/classifier/model_it_1.pt"
+MODEL_PATH = "src/classifier/model_it_1-2.pt"
 CONFIG = {
     "sr": 48000,
     "mono": True,
@@ -65,12 +65,13 @@ def cache_wav_file(file_name: str, file_bytes: bytes):
 
 @st.cache_resource
 def load_model():
+    import os
     from src.classifier.SmallAudioCNN import SmallAudioCNN
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    last_modified = os.path.getmtime(MODEL_PATH)
     checkpoint = torch.load(MODEL_PATH, map_location=device)
 
-    # Load metadata (species, locations, etc.)
     meta = checkpoint.get("meta", {})
     num_species = len(meta.get("species", [])) or 1
     num_locations = len(meta.get("locations", [])) or 2
@@ -80,7 +81,7 @@ def load_model():
     model.load_state_dict(state_dict)
     model.eval()
 
-    return model, meta, device
+    return model, meta, device, last_modified
 
 @st.cache_data
 def process_audio_files(cached_files):
@@ -94,7 +95,7 @@ def process_audio_files(cached_files):
     Returns:
         known_df, unknown_df: pandas DataFrames with classification results
     """
-    model, meta, device = load_model()
+    model, meta, device, _ = load_model()
     known_results = []
     unknown_results = []
 
@@ -129,6 +130,7 @@ def process_audio_files(cached_files):
             confidence = conf.item()
             predicted_species = meta["species"][pred_idx.item()]
             print(meta)
+            print(predicted_species, confidence)
 
         confidence_threshold = 0.5
         if confidence >= confidence_threshold:
