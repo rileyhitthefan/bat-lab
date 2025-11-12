@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from io import BytesIO
 import time
 
 # ============================================================================
@@ -62,6 +61,12 @@ if 'unknown_data' not in st.session_state:
 
 if 'uploaded_files' not in st.session_state:
     st.session_state.uploaded_files = []
+
+# --- Part 1: Training data state (ADD THESE LINES HERE) ---
+if 'training_entries' not in st.session_state:
+    st.session_state.training_entries = []  # list of dicts
+if 'show_add_training' not in st.session_state:
+    st.session_state.show_add_training = False
 
 
 # ============================================================================
@@ -151,7 +156,7 @@ def convert_df_to_csv(df):
 # ============================================================================
 
 # Application title
-st.title("🦇 Bat Acoustic Identification System")
+st.title("🦇 Bat Acoustic Identification System 🦇")
 st.markdown("---")
 
 # ============================================================================
@@ -182,15 +187,25 @@ if 'detectors' not in st.session_state:
     st.session_state.detectors = []
 if 'show_add_detector' not in st.session_state:
     st.session_state.show_add_detector = False
-# Species session state
+
+# Species session state - PRE-POPULATED WITH YOUR SPECIES
 if 'species' not in st.session_state:
-    # list of dicts: Abbreviation, LatinName, CommonName
-    st.session_state.species = []
+    st.session_state.species = [
+        {"Abbreviation": "TAPMAU", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "TADAEG", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "OTOMAR", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "SCODIN", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "MINNAT", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "NEOCAP", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "MYOTRI", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "NYCTHE", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "RHICAP", "LatinName": "", "CommonName": ""},
+    ]
 
 if 'show_add_species' not in st.session_state:
     st.session_state.show_add_species = False
 
-col1, col2, col3 = st.columns([1, 1, 2])
+col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 
 with col1:
     # Classify button - triggers the ML model processing
@@ -199,9 +214,14 @@ with col1:
 with col2:
     # Add new sound detector button - now opens a small form
     add_detector_button = st.button("➕ Add New Sound Detector", use_container_width=True)
+
 with col3:
     # Same look/feel as detector button
     add_species_button = st.button("➕ Add New Species", use_container_width=True)
+
+with col4:
+    # Add training data button
+    add_training_button = st.button("➕ Add Training Data", use_container_width=True)
 
 # Handle classify button click
 if classify_button:
@@ -230,7 +250,11 @@ if add_detector_button:
 if add_species_button:
     st.session_state.show_add_species = True
 
-#Detector input form (shown when toggled)
+# Handle add training data button click -> toggle the form
+if add_training_button:
+    st.session_state.show_add_training = True
+
+# Detector input form (shown when toggled)
 if st.session_state.show_add_detector:
     st.markdown("### ➕ Register a New Sound Detector")
     with st.form("add_detector_form", clear_on_submit=False):
@@ -282,8 +306,8 @@ if st.session_state.show_add_species:
     st.markdown("### ➕ Register a New Species")
     with st.form("add_species_form", clear_on_submit=False):
         abbr = st.text_input("Abbreviation *", placeholder="e.g., MYLU")
-        latin = st.text_input("Latin Name *", placeholder="e.g., Myotis lucifugus")
-        common = st.text_input("Common Name *", placeholder="e.g., Little brown bat")
+        latin = st.text_input("Latin Name (optional)", placeholder="e.g., Myotis lucifugus")
+        common = st.text_input("Common Name (optional)", placeholder="e.g., Little brown bat")
 
         submitted_species = st.form_submit_button("💾 Save Species", use_container_width=True)
         if submitted_species:
@@ -297,15 +321,14 @@ if st.session_state.show_add_species:
             if not abbr:
                 errors.append("Abbreviation is required.")
             else:
-                # Accept A–Z / 0–9 / _ / - ; keep short like typical codes
-                cleaned = abbr.replace('-', '').replace('_', '')
-                if not cleaned.isalnum() or len(abbr) > 16:
-                    errors.append("Abbreviation must be alphanumeric (dashes/underscores allowed) and ≤ 16 chars.")
+                # Only accept letters and numbers
+                if not abbr.isalnum():
+                    errors.append("Abbreviation must contain only letters and numbers.")
+                elif len(abbr) > 16:
+                    errors.append("Abbreviation must be ≤ 16 characters.")
 
-            if not latin:
-                errors.append("Latin name is required.")
-            if not common:
-                errors.append("Common name is required.")
+            # Latin Name and Common Name are optional, no validation needed
+            # They're already strings from text_input
 
             # -----------------------------------------------------
 
@@ -321,11 +344,139 @@ if st.session_state.show_add_species:
                 st.session_state.show_add_species = False
                 st.success("✅ New species saved.")
 
+# Training data input form (shown when toggled) - NEW IMPLEMENTATION
+if st.session_state.show_add_training:
+    st.markdown("### ➕ Add Training Data")
+
+    # Pre-populated locations (placeholders)
+    placeholder_locations = ["Addo Elephant National Park", "Great Fish River Nature Reserve", "Amakhala Game Reserve", "Tanglewood Conservation Area"]
+
+    with st.form("add_training_form", clear_on_submit=False):
+        # Two columns for species and location selection
+        col_species, col_location = st.columns(2)
+
+        with col_species:
+            st.markdown("**Select Species:**")
+            # Search box for species
+            species_search = st.text_input(
+                "Search species",
+                placeholder="Type to filter...",
+                key="species_search"
+            )
+
+            # Filter species based on search - show only abbreviation
+            all_species = [s['Abbreviation'] for s in st.session_state.species]
+            filtered_species = [sp for sp in all_species
+                                if species_search.lower() in sp.lower()] if species_search else all_species
+
+            # Radio buttons for single selection (scrollable)
+            selected_species = st.radio(
+                "Species options",
+                options=filtered_species,
+                label_visibility="collapsed",
+                key="species_radio"
+            )
+
+        with col_location:
+            st.markdown("**Select Location:**")
+            # Search box for locations
+            location_search = st.text_input(
+                "Search location",
+                placeholder="Type to filter...",
+                key="location_search"
+            )
+
+            # Filter locations based on search - use placeholder locations
+            filtered_locations = [loc for loc in placeholder_locations
+                                  if
+                                  location_search.lower() in loc.lower()] if location_search else placeholder_locations
+
+            # Radio buttons for single selection (scrollable)
+            selected_location = st.radio(
+                "Location options",
+                options=filtered_locations,
+                label_visibility="collapsed",
+                key="location_radio"
+            )
+
+        st.markdown("---")
+
+        # File uploader for training audio files
+        st.markdown("**Upload Training Audio Files (.wav, max 200MB per file):**")
+        training_files = st.file_uploader(
+            "Drop .wav files here",
+            type=['wav'],
+            accept_multiple_files=True,
+            key='training_file_uploader',
+            label_visibility="collapsed"
+        )
+
+        if training_files:
+            # Check file sizes
+            oversized_files = []
+            for f in training_files:
+                file_size_mb = f.size / (1024 * 1024)  # Convert to MB
+                if file_size_mb > 200:
+                    oversized_files.append(f"{f.name} ({file_size_mb:.1f}MB)")
+
+            if oversized_files:
+                st.error(f"❌ The following files exceed 200MB limit: {', '.join(oversized_files)}")
+            else:
+                st.info(f"📁 {len(training_files)} training file(s) selected")
+
+        st.markdown("---")
+
+        # Save and Cancel buttons
+        col_save, col_cancel = st.columns(2)
+        with col_save:
+            submitted_training = st.form_submit_button("💾 Save Training Data", use_container_width=True)
+        with col_cancel:
+            cancel_training = st.form_submit_button("❌ Cancel", use_container_width=True)
+
+        if submitted_training:
+            if not training_files:
+                st.error("❌ Please upload at least one .wav file.")
+            else:
+                # Check for oversized files again before saving
+                oversized = [f for f in training_files if f.size / (1024 * 1024) > 200]
+                if oversized:
+                    st.error("❌ Cannot save: Some files exceed the 200MB limit.")
+                else:
+                    # Store training entry
+                    st.session_state.training_entries.append({
+                        "Species": selected_species,
+                        "Location": selected_location,
+                        "FileCount": len(training_files),
+                        "FileNames": [f.name for f in training_files]
+                    })
+
+                    st.session_state.show_add_training = False
+                    st.success(
+                        f"✅ Training data saved: {len(training_files)} file(s) for {selected_species} at {selected_location}")
+
+        if cancel_training:
+            st.session_state.show_add_training = False
+
 # Show a compact summary of registered detectors (if any)
 if st.session_state.detectors:
     st.caption("**Registered Detectors**")
     st.dataframe(
         pd.DataFrame(st.session_state.detectors),
+        use_container_width=True,
+        hide_index=True,
+        height=180
+    )
+
+# Show a compact summary of training data entries (if any)
+if st.session_state.training_entries:
+    st.caption("**Training Data Entries**")
+    training_df = pd.DataFrame([{
+        "Species": entry["Species"],
+        "Location": entry["Location"],
+        "Files": entry["FileCount"]
+    } for entry in st.session_state.training_entries])
+    st.dataframe(
+        training_df,
         use_container_width=True,
         hide_index=True,
         height=180
