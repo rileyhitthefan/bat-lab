@@ -3,12 +3,23 @@ import pandas as pd
 import numpy as np
 from io import BytesIO
 from scipy.io import wavfile
+import librosa
 import time
+import torch
+import torch.nn.functional as F
 
-# ============================================================================
-# PAGE CONFIGURATION
-# ============================================================================
-# Set the page layout to wide mode for better space utilization
+MODEL_PATH = "src/classifier/model_it_1-2.pt"
+CONFIG = {
+    "sr": 48000,
+    "mono": True,
+    "duration_s": 1.0,
+    "n_fft": 1024,
+    "hop_length": 512,
+    "n_mels": 128,
+    "fmin": 1000,
+    "fmax": 24000,
+}
+
 st.set_page_config(page_title="Bat Lab", layout="wide")
 
 # Hide only the "Show/hide columns" button in st.dataframe/st.data_editor toolbars
@@ -51,168 +62,156 @@ div[data-testid="stElementToolbar"] button[aria-label*="Download"] { display:non
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# SESSION STATE INITIALIZATION
-# ============================================================================
-# Initialize session state variables to persist data across reruns
-# These variables store the classification results throughout the session
 if 'known_data' not in st.session_state:
     st.session_state.known_data = pd.DataFrame(columns=['FileName', 'SpeciesPrediction', 'ConfidenceLevel'])
-
 if 'unknown_data' not in st.session_state:
     st.session_state.unknown_data = pd.DataFrame(columns=['FileName'])
-
 if 'uploaded_files' not in st.session_state:
     st.session_state.uploaded_files = []
+if 'training_entries' not in st.session_state:
+    st.session_state.training_entries = []  # list of dicts
+if 'show_add_training' not in st.session_state:
+    st.session_state.show_add_training = False
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
 @st.cache_resource
 def cache_wav_file(file_name: str, file_bytes: bytes):
-    """
-    Cache WAV file in memory for temporary processing.
-    
-    Args:
-        file_name: Name of uploaded file.
-        file_bytes: File contents.
-    Returns:
-        (file_name, sample_rate, audio_data)
-    """
     buffer = BytesIO(file_bytes)
     sampling_rate, audio_data = wavfile.read(buffer)
     if audio_data.ndim > 1:
         audio_data = np.mean(audio_data, axis=1)
     return file_name, sampling_rate, audio_data
 
-@st.cache_data
-def process_audio_files(uploaded_files):
-    """
-    Process uploaded audio files and classify them as KNOWN or UNKNOWN.
+@st.cache_resource
+def load_model():
+    import os
+    from src.classifier.SmallAudioCNN import SmallAudioCNN
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    This is a placeholder function where you would integrate your actual
-    machine learning model for bat species identification.
+    last_modified = os.path.getmtime(MODEL_PATH)
+    checkpoint = torch.load(MODEL_PATH, map_location=device)
+
+    meta = checkpoint.get("meta", {})
+    num_species = len(meta.get("species", [])) or 1
+    num_locations = len(meta.get("locations", [])) or 2
+
+    model = SmallAudioCNN(num_species, num_locations).to(device)
+    state_dict = checkpoint["model_state"] if "model_state" in checkpoint else checkpoint
+    model.load_state_dict(state_dict)
+    model.eval()
+
+    return model, meta, device, last_modified
+
+@st.cache_data
+def process_audio_files(cached_files):
+    """
+    Process uploaded audio files (cached tuples) and classify them using the trained PyTorch model.
+    Each file is assigned a loc_id to match model input requirements.
 
     Args:
-        uploaded_files: List of uploaded audio files from Streamlit
+        cached_files: list of tuples (file_name, sampling_rate, audio_data)
 
     Returns:
-        tuple: (known_df, unknown_df) DataFrames with classification results
+        known_df, unknown_df: pandas DataFrames with classification results
     """
+    model, meta, device, _ = load_model()
     known_results = []
     unknown_results = []
 
-    # Iterate through each uploaded file
-    for file_data in uploaded_files:
-        file_name, sampling_rate, audio_data = file_data
+    # Determine number of locations from model
+    num_locations = model.loc_embed.num_embeddings if hasattr(model, "loc_embed") else 1
 
-        # ====================================================================
-        # MODEL INTEGRATION POINT
-        # ====================================================================
-        # TODO: Replace this section with your actual ML model prediction
-        # Example integration:
-        # 1. Load the audio file: audio_data = load_audio(file)
-        # 2. Extract features: features = extract_features(audio_data)
-        # 3. Make prediction: species, confidence = model.predict(features)
-        # 4. Set threshold: if confidence > threshold, add to known, else unknown
+    for i, (file_name, sr_orig, y_orig) in enumerate(cached_files):
+        y = y_orig.astype(np.float32)
+        if y.ndim > 1:
+            y = np.mean(y, axis=1)  # convert to mono
+        target_len = int(CONFIG["sr"] * CONFIG["duration_s"])
+        if len(y) < target_len:
+            y = np.pad(y, (0, target_len - len(y)))
+        else:
+            y = y[:target_len]
 
-        # Placeholder logic for demonstration
-        # This simulates model predictions with dummy data
-        import random
+        mel = librosa.feature.melspectrogram(
+            y=y, sr=CONFIG["sr"], n_fft=CONFIG["n_fft"], hop_length=CONFIG["hop_length"],
+            n_mels=CONFIG["n_mels"], fmin=CONFIG["fmin"], fmax=CONFIG["fmax"]
+        )
+        mel_db = librosa.power_to_db(mel, ref=np.max)
+        mel_norm = (mel_db - mel_db.min()) / (mel_db.max() - mel_db.min() + 1e-8)
 
-        # Simulate confidence score (0-100%)
-        confidence = random.uniform(0.5, 0.99)
+        x = torch.tensor(mel_norm).unsqueeze(0).unsqueeze(0).to(device).float()
+        # Assign a loc_id: cycle through available embeddings if multiple
+        loc_id = torch.tensor([i % num_locations], dtype=torch.long).to(device)
 
-        # Define a confidence threshold (adjust based on your model)
-        confidence_threshold = 0.75
+        with torch.no_grad():
+            logits = model(x, loc_id)
+            probs = F.softmax(logits, dim=1)
+            conf, pred_idx = torch.max(probs, dim=1)
+            confidence = conf.item()
+            predicted_species = meta["species"][pred_idx.item()]
+            print(meta)
+            print(predicted_species, confidence)
 
+        confidence_threshold = 0.5
         if confidence >= confidence_threshold:
-            # High confidence - add to KNOWN category
-            species_list = ['Myotis lucifugus', 'Eptesicus fuscus', 'Lasiurus borealis',
-                            'Myotis septentrionalis', 'Perimyotis subflavus']
-            predicted_species = random.choice(species_list)
-
             known_results.append({
-                'FileName': file_name,
-                'SpeciesPrediction': predicted_species,
-                'ConfidenceLevel': f"{confidence * 100:.2f}%"
+                "FileName": file_name,
+                "SpeciesPrediction": predicted_species,
+                "ConfidenceLevel": f"{confidence * 100:.2f}%",
             })
         else:
-            # Low confidence - add to UNKNOWN category
-            unknown_results.append({
-                'FileName': file_name
-            })
+            unknown_results.append({"FileName": file_name})
 
-    # Convert results to DataFrames
     known_df = pd.DataFrame(known_results)
     unknown_df = pd.DataFrame(unknown_results)
-
     return known_df, unknown_df
 
-
 def convert_df_to_csv(df):
-    """
-    Convert a DataFrame to CSV format for download.
-
-    Args:
-        df: pandas DataFrame to convert
-
-    Returns:
-        bytes: CSV data as bytes
-    """
     return df.to_csv(index=False).encode('utf-8')
 
-
-# ============================================================================
-# MAIN UI LAYOUT
-# ============================================================================
-
-# Application title
 st.title("🦇 Bat Acoustic Identification System")
 st.markdown("---")
 
-# ============================================================================
-# FILE UPLOAD SECTION
-# ============================================================================
 st.subheader("Upload Audio Files")
-
-# File uploader widget - accepts multiple .wav files
 uploaded_files = st.file_uploader(
     "Upload",
     type=['wav'],
     accept_multiple_files=True,
     key='file_uploader'
 )
-
-# Display number of uploaded files
 if uploaded_files:
+    # remove cached files that are no longer uploaded
+    st.session_state["uploaded_files"] = [
+        f for f in st.session_state["uploaded_files"]
+        if f[0] in [file.name for file in uploaded_files]
+    ]
     for file in uploaded_files:
-        # Check if file already cached in session state
         if file.name not in [f[0] for f in st.session_state["uploaded_files"]]:
-            file_name, sampling_rate, audio_data = cache_wav_file(file.name, file.getvalue())
+            file_name, sampling_rate, audio_data = cache_wav_file(file.name, file.read())
             st.session_state["uploaded_files"].append((file_name, sampling_rate, audio_data))
     st.info(f"📁 {len(uploaded_files)} file(s) uploaded")
     uploaded_files = st.session_state["uploaded_files"]
 
 st.markdown("---")
 
-# ============================================================================
-# CLASSIFICATION SECTION
-# ============================================================================
-# Ensure detectors state exists
 if 'detectors' not in st.session_state:
     st.session_state.detectors = []
 if 'show_add_detector' not in st.session_state:
     st.session_state.show_add_detector = False
-# Species session state
 if 'species' not in st.session_state:
-    # list of dicts: Abbreviation, LatinName, CommonName
-    st.session_state.species = []
-
+    st.session_state.species = [
+        {"Abbreviation": "TAPMAU", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "TADAEG", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "OTOMAR", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "SCODIN", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "MINNAT", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "NEOCAP", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "MYOTRI", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "NYCTHE", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "RHICAP", "LatinName": "", "CommonName": ""},
+    ]
 if 'show_add_species' not in st.session_state:
     st.session_state.show_add_species = False
 
-col1, col2, col3 = st.columns([1, 1, 2])
+col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 
 with col1:
     # Classify button - triggers the ML model processing
@@ -221,25 +220,22 @@ with col1:
 with col2:
     # Add new sound detector button - now opens a small form
     add_detector_button = st.button("➕ Add New Sound Detector", use_container_width=True)
+
 with col3:
     # Same look/feel as detector button
     add_species_button = st.button("➕ Add New Species", use_container_width=True)
 
-# Handle classify button click
+with col4:
+    # Add training data button
+    add_training_button = st.button("➕ Add Training Data", use_container_width=True)
+
 if classify_button:
     if uploaded_files:
-        # Show progress spinner while processing
         with st.spinner('Classifying audio files...'):
-            # Simulate processing time (remove in production)
             time.sleep(1)
-
-            # Process the uploaded files using the ML model
             known_df, unknown_df = process_audio_files(uploaded_files)
-
-            # Update session state with new results
             st.session_state.known_data = known_df
             st.session_state.unknown_data = unknown_df
-
         st.success("✅ Classification complete!")
     else:
         st.warning("⚠️ Please upload audio files first.")
@@ -252,7 +248,11 @@ if add_detector_button:
 if add_species_button:
     st.session_state.show_add_species = True
 
-#Detector input form (shown when toggled)
+# Handle add training data button click -> toggle the form
+if add_training_button:
+    st.session_state.show_add_training = True
+
+# Detector input form (shown when toggled)
 if st.session_state.show_add_detector:
     st.markdown("### ➕ Register a New Sound Detector")
     with st.form("add_detector_form", clear_on_submit=False):
@@ -304,8 +304,8 @@ if st.session_state.show_add_species:
     st.markdown("### ➕ Register a New Species")
     with st.form("add_species_form", clear_on_submit=False):
         abbr = st.text_input("Abbreviation *", placeholder="e.g., MYLU")
-        latin = st.text_input("Latin Name *", placeholder="e.g., Myotis lucifugus")
-        common = st.text_input("Common Name *", placeholder="e.g., Little brown bat")
+        latin = st.text_input("Latin Name (optional)", placeholder="e.g., Myotis lucifugus")
+        common = st.text_input("Common Name (optional)", placeholder="e.g., Little brown bat")
 
         submitted_species = st.form_submit_button("💾 Save Species", use_container_width=True)
         if submitted_species:
@@ -319,15 +319,14 @@ if st.session_state.show_add_species:
             if not abbr:
                 errors.append("Abbreviation is required.")
             else:
-                # Accept A–Z / 0–9 / _ / - ; keep short like typical codes
-                cleaned = abbr.replace('-', '').replace('_', '')
-                if not cleaned.isalnum() or len(abbr) > 16:
-                    errors.append("Abbreviation must be alphanumeric (dashes/underscores allowed) and ≤ 16 chars.")
+                # Only accept letters and numbers
+                if not abbr.isalnum():
+                    errors.append("Abbreviation must contain only letters and numbers.")
+                elif len(abbr) > 16:
+                    errors.append("Abbreviation must be ≤ 16 characters.")
 
-            if not latin:
-                errors.append("Latin name is required.")
-            if not common:
-                errors.append("Common name is required.")
+            # Latin Name and Common Name are optional, no validation needed
+            # They're already strings from text_input
 
             # -----------------------------------------------------
 
@@ -343,11 +342,139 @@ if st.session_state.show_add_species:
                 st.session_state.show_add_species = False
                 st.success("✅ New species saved.")
 
+# Training data input form (shown when toggled) - NEW IMPLEMENTATION
+if st.session_state.show_add_training:
+    st.markdown("### ➕ Add Training Data")
+
+    # Pre-populated locations (placeholders)
+    placeholder_locations = ["Addo Elephant National Park", "Great Fish River Nature Reserve", "Amakhala Game Reserve", "Tanglewood Conservation Area"]
+
+    with st.form("add_training_form", clear_on_submit=False):
+        # Two columns for species and location selection
+        col_species, col_location = st.columns(2)
+
+        with col_species:
+            st.markdown("**Select Species:**")
+            # Search box for species
+            species_search = st.text_input(
+                "Search species",
+                placeholder="Type to filter...",
+                key="species_search"
+            )
+
+            # Filter species based on search - show only abbreviation
+            all_species = [s['Abbreviation'] for s in st.session_state.species]
+            filtered_species = [sp for sp in all_species
+                                if species_search.lower() in sp.lower()] if species_search else all_species
+
+            # Radio buttons for single selection (scrollable)
+            selected_species = st.radio(
+                "Species options",
+                options=filtered_species,
+                label_visibility="collapsed",
+                key="species_radio"
+            )
+
+        with col_location:
+            st.markdown("**Select Location:**")
+            # Search box for locations
+            location_search = st.text_input(
+                "Search location",
+                placeholder="Type to filter...",
+                key="location_search"
+            )
+
+            # Filter locations based on search - use placeholder locations
+            filtered_locations = [loc for loc in placeholder_locations
+                                  if
+                                  location_search.lower() in loc.lower()] if location_search else placeholder_locations
+
+            # Radio buttons for single selection (scrollable)
+            selected_location = st.radio(
+                "Location options",
+                options=filtered_locations,
+                label_visibility="collapsed",
+                key="location_radio"
+            )
+
+        st.markdown("---")
+
+        # File uploader for training audio files
+        st.markdown("**Upload Training Audio Files (.wav, max 200MB per file):**")
+        training_files = st.file_uploader(
+            "Drop .wav files here",
+            type=['wav'],
+            accept_multiple_files=True,
+            key='training_file_uploader',
+            label_visibility="collapsed"
+        )
+
+        if training_files:
+            # Check file sizes
+            oversized_files = []
+            for f in training_files:
+                file_size_mb = f.size / (1024 * 1024)  # Convert to MB
+                if file_size_mb > 200:
+                    oversized_files.append(f"{f.name} ({file_size_mb:.1f}MB)")
+
+            if oversized_files:
+                st.error(f"❌ The following files exceed 200MB limit: {', '.join(oversized_files)}")
+            else:
+                st.info(f"📁 {len(training_files)} training file(s) selected")
+
+        st.markdown("---")
+
+        # Save and Cancel buttons
+        col_save, col_cancel = st.columns(2)
+        with col_save:
+            submitted_training = st.form_submit_button("💾 Save Training Data", use_container_width=True)
+        with col_cancel:
+            cancel_training = st.form_submit_button("❌ Cancel", use_container_width=True)
+
+        if submitted_training:
+            if not training_files:
+                st.error("❌ Please upload at least one .wav file.")
+            else:
+                # Check for oversized files again before saving
+                oversized = [f for f in training_files if f.size / (1024 * 1024) > 200]
+                if oversized:
+                    st.error("❌ Cannot save: Some files exceed the 200MB limit.")
+                else:
+                    # Store training entry
+                    st.session_state.training_entries.append({
+                        "Species": selected_species,
+                        "Location": selected_location,
+                        "FileCount": len(training_files),
+                        "FileNames": [f.name for f in training_files]
+                    })
+
+                    st.session_state.show_add_training = False
+                    st.success(
+                        f"✅ Training data saved: {len(training_files)} file(s) for {selected_species} at {selected_location}")
+
+        if cancel_training:
+            st.session_state.show_add_training = False
+
 # Show a compact summary of registered detectors (if any)
 if st.session_state.detectors:
     st.caption("**Registered Detectors**")
     st.dataframe(
         pd.DataFrame(st.session_state.detectors),
+        use_container_width=True,
+        hide_index=True,
+        height=180
+    )
+
+# Show a compact summary of training data entries (if any)
+if st.session_state.training_entries:
+    st.caption("**Training Data Entries**")
+    training_df = pd.DataFrame([{
+        "Species": entry["Species"],
+        "Location": entry["Location"],
+        "Files": entry["FileCount"]
+    } for entry in st.session_state.training_entries])
+    st.dataframe(
+        training_df,
         use_container_width=True,
         hide_index=True,
         height=180
