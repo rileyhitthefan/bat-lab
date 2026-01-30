@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+models/checkpoints/*.pt
+cache_mels/
+cache_numfeats/
+test_predictions.csv
+reports/
