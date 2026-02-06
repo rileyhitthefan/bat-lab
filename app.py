@@ -458,15 +458,15 @@ if 'detectors' not in st.session_state:
 
 if 'species' not in st.session_state:
     st.session_state.species = [
-        {"Abbreviation": "TAPMAU", "LatinName": "", "CommonName": ""},
-        {"Abbreviation": "TADAEG", "LatinName": "", "CommonName": ""},
-        {"Abbreviation": "OTOMAR", "LatinName": "", "CommonName": ""},
-        {"Abbreviation": "SCODIN", "LatinName": "", "CommonName": ""},
-        {"Abbreviation": "MINNAT", "LatinName": "", "CommonName": ""},
-        {"Abbreviation": "NEOCAP", "LatinName": "", "CommonName": ""},
-        {"Abbreviation": "MYOTRI", "LatinName": "", "CommonName": ""},
-        {"Abbreviation": "NYCTHE", "LatinName": "", "CommonName": ""},
-        {"Abbreviation": "RHICAP", "LatinName": "", "CommonName": ""},
+        {"Abbreviation": "TAPMAU", "Latin Name": "", "Common Name": ""},
+        {"Abbreviation": "TADAEG", "Latin Name": "", "Common Name": ""},
+        {"Abbreviation": "OTOMAR", "Latin Name": "", "Common Name": ""},
+        {"Abbreviation": "SCODIN", "Latin Name": "", "Common Name": ""},
+        {"Abbreviation": "MINNAT", "Latin Name": "", "Common Name": ""},
+        {"Abbreviation": "NEOCAP", "Latin Name": "", "Common Name": ""},
+        {"Abbreviation": "MYOTRI", "Latin Name": "", "Common Name": ""},
+        {"Abbreviation": "NYCTHE", "Latin Name": "", "Common Name": ""},
+        {"Abbreviation": "RHICAP", "Latin Name": "", "Common Name": ""},
     ]
 
 if 'logged_in' not in st.session_state:
@@ -699,6 +699,57 @@ if st.session_state.logged_in:
                 background-color: #000000 !important;
             }
             
+            /* Streamlit radio button styling - multiple selectors for compatibility */
+            input[type="radio"],
+            [data-testid="stRadio"] input[type="radio"],
+            [role="radiogroup"] input[type="radio"] {
+                appearance: none !important;
+                -webkit-appearance: none !important;
+                -moz-appearance: none !important;
+                width: 18px !important;
+                height: 18px !important;
+                min-width: 18px !important;
+                min-height: 18px !important;
+                border: 2px solid #FFFFFF !important;
+                border-radius: 50% !important;
+                margin-right: 10px !important;
+                cursor: pointer !important;
+                background-color: transparent !important;
+                position: relative !important;
+                flex-shrink: 0 !important;
+                display: inline-block !important;
+            }
+            
+            /* Radio button when checked - fill with purple */
+            input[type="radio"]:checked,
+            [data-testid="stRadio"] input[type="radio"]:checked,
+            [role="radiogroup"] input[type="radio"]:checked {
+                background-color: #B19CD9 !important;
+                border: 2px solid #FFFFFF !important;
+            }
+            
+            /* Radio button on hover */
+            input[type="radio"]:hover,
+            [data-testid="stRadio"] input[type="radio"]:hover {
+                border-color: #B19CD9 !important;
+            }
+            
+            /* Radio button labels */
+            [role="radiogroup"] label,
+            [data-testid="stRadio"] label {
+                cursor: pointer !important;
+                display: flex !important;
+                align-items: center !important;
+                padding: 8px 0 !important;
+                color: #FFFFFF !important;
+            }
+            
+            /* Streamlit's custom radio span elements */
+            [role="radiogroup"] span,
+            [data-testid="stRadio"] span {
+                color: #FFFFFF !important;
+            }
+            
             /* All buttons purple hover */
             button:hover {
                 border: 2px solid #B19CD9 !important;
@@ -752,31 +803,17 @@ with tab1:
     st.markdown("---")
     st.header("Upload and Classify Bat Acoustic Calls")
     
-    # Add buttons - always show Clear Uploader, only show Start New Session when there's data
-    if st.session_state.known_data.empty and st.session_state.unknown_data.empty:
-        # Only show Clear Uploader button
+    # Add Start New Session button only when there's data
+    if not st.session_state.known_data.empty or not st.session_state.unknown_data.empty:
         col1, col2 = st.columns([3, 1])
         with col2:
-            if st.button("**Clear Files**", use_container_width=True, help="Remove all files from the uploader"):
-                # Increment the key to force recreate the file uploader
-                st.session_state.file_uploader_key += 1
-                st.success("✅ File uploader cleared!")
-                st.rerun()
-    else:
-        # Show both buttons
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col2:
-            if st.button("**Start New Session**", use_container_width=True, help="Clear all classified files and start fresh"):
+            if st.button("**Start New Session**", use_container_width=True):
                 st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
                 st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
                 st.session_state.uploaded_files = []
-                st.success("✅ Session reset! Ready for new files.")
-                st.rerun()
-        with col3:
-            if st.button("**Clear Files**", use_container_width=True, help="Remove all files from the uploader"):
                 # Increment the key to force recreate the file uploader
                 st.session_state.file_uploader_key += 1
-                st.success("✅ File uploader cleared!")
+                st.success("✅ Session reset! Ready for new files.")
                 st.rerun()
     
     st.markdown("---")
@@ -854,11 +891,10 @@ with tab1:
 with tab2:
     st.markdown("---")
     st.header("Register a New Detector")
-    st.markdown("Add acoustic detector locations to your database.")
     st.markdown("---")
 
     with st.form("add_detector_form", clear_on_submit=False):
-        name = st.text_input("Detector Name *", placeholder="e.g., Detector-A1")
+        name = st.text_input("Detector ID *", placeholder="e.g., Detector-A1")
         lat = st.text_input("Latitude *", placeholder="e.g., -33.9249")
         lon = st.text_input("Longitude *", placeholder="e.g., 18.4241")
 
@@ -872,7 +908,7 @@ with tab2:
             lon = (lon or "").strip()
 
             if not name:
-                errors.append("Detector Name is required.")
+                errors.append("Detector ID is required.")
             if not lat:
                 errors.append("Latitude is required.")
             else:
@@ -898,7 +934,7 @@ with tab2:
                     st.error(f"Error: {e}")
             else:
                 st.session_state.detectors.append({
-                    "Detector": name,
+                    "Detector ID": name,
                     "Latitude": lat,
                     "Longitude": lon,
                 })
@@ -925,7 +961,6 @@ with tab2:
 with tab3:
     st.markdown("---")
     st.header("Register a New Species")
-    st.markdown("Add bat species to the identification database.")
     st.markdown("---")
 
     with st.form("add_species_form", clear_on_submit=False):
@@ -956,8 +991,8 @@ with tab3:
             else:
                 st.session_state.species.append({
                     "Abbreviation": abbr,
-                    "LatinName": latin,
-                    "CommonName": common,
+                    "Latin Name": latin,
+                    "Common Name": common,
                 })
                 st.success("New species saved successfully!")
                 st.rerun()
@@ -981,7 +1016,6 @@ with tab3:
 with tab4:
     st.markdown("---")
     st.header("Add Training Data")
-    st.markdown("Upload labeled acoustic recordings to improve species identification accuracy.")
     st.markdown("---")
 
     placeholder_locations = ["Addo Elephant National Park", "Great Fish River Nature Reserve",
