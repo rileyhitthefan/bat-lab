@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bat-lab"
+version = "0.1.0"
+description = "BatLab app and ML package"
+requires-python = ">=3.9"
+dependencies = [
+    "streamlit",
+    "pandas",
+    "torch",
+    "librosa",
+    "numpy",
+    "scipy",
+    "PyYAML",
+    "tqdm",
+    "scikit-learn",
+    "soundfile",
+    "scikit-image",
+]
+
+[project.scripts]
+batlab-train = "ml.scripts.train:main"
+batlab-predict = "ml.scripts.predict:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"

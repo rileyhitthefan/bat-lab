@@ -1,0 +1,259 @@
+/* ============================================================================
+   BatLab - Dark theme (main app, logged-in only)
+   ============================================================================ */
+
+/* Equal width tabs */
+div[data-baseweb="tab-list"] {
+    display: flex !important;
+    width: 100% !important;
+}
+
+div[data-baseweb="tab-list"] button {
+    flex: 1 !important;
+    justify-content: center !important;
+}
+
+/* Tab text style */
+button[data-baseweb="tab"] {
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    text-align: center !important;
+    padding: 12px 0px !important;
+}
+
+button[data-baseweb="tab"] p {
+    font-size: 18px !important;
+    font-weight: 700 !important;
+}
+
+div[data-baseweb="tab-list"] {
+    gap: 8px !important;
+}
+
+/* Force black background */
+:root {
+    background-color: #000000 !important;
+}
+
+body {
+    background-color: #000000 !important;
+}
+
+.main, .stApp, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
+    background-color: #000000 !important;
+}
+
+div, section, [data-testid="stVerticalBlock"], [data-testid="stHorizontalBlock"] {
+    background-color: transparent !important;
+}
+
+.main .block-container {
+    background-color: #000000 !important;
+}
+
+/* Force all text to white */
+p, span, div, h1, h2, h3, h4, h5, h6, label, li {
+    color: #FFFFFF !important;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: #000000 !important;
+}
+
+/* Tabs styling */
+button[data-baseweb="tab"] {
+    color: #B19CD9 !important;
+    background-color: transparent !important;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+button[data-baseweb="tab"][aria-selected="true"] {
+    color: #B19CD9 !important;
+    border-bottom-color: #B19CD9 !important;
+    background-color: transparent !important;
+    border: none !important;
+    border-bottom: 2px solid #B19CD9 !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+[data-baseweb="tab-list"] {
+    background-color: #000000 !important;
+}
+
+button[data-baseweb="tab"]:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* Dataframes/Tables */
+[data-testid="stDataFrame"], [data-testid="stTable"] {
+    background-color: #000000 !important;
+    color: #FFFFFF !important;
+}
+
+/* Input boxes and text areas */
+input, textarea, [data-baseweb="input"] {
+    background-color: #1A1A1A !important;
+    color: #FFFFFF !important;
+    border: 1px solid #444444 !important;
+    caret-color: #FFFFFF !important;
+}
+
+/* Forms */
+[data-testid="stForm"] {
+    background-color: #000000 !important;
+    border: 1px solid #333333 !important;
+}
+
+/* File uploader */
+[data-testid="stFileUploader"] {
+    background-color: #1A1A1A !important;
+}
+
+[data-testid="stFileUploader"] button,
+[data-testid="stFileUploaderDropzone"] button {
+    background-color: #000000 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #FFFFFF !important;
+}
+
+[data-testid="stFileUploader"] button:hover,
+[data-testid="stFileUploaderDropzone"] button:hover {
+    background-color: #000000 !important;
+    color: #FFFFFF !important;
+    border: 2px solid #B19CD9 !important;
+}
+
+/* Radio buttons */
+[role="radiogroup"] {
+    background-color: #000000 !important;
+}
+
+/* Radio button styling - purple accent */
+input[type="radio"],
+[data-testid="stRadio"] input[type="radio"],
+[role="radiogroup"] input[type="radio"] {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+    border: 2px solid #FFFFFF !important;
+    border-radius: 50% !important;
+    margin-right: 10px !important;
+    cursor: pointer !important;
+    background-color: transparent !important;
+    position: relative !important;
+    flex-shrink: 0 !important;
+    display: inline-block !important;
+}
+
+input[type="radio"]:checked,
+[data-testid="stRadio"] input[type="radio"]:checked,
+[role="radiogroup"] input[type="radio"]:checked {
+    background-color: #B19CD9 !important;
+    border: 2px solid #FFFFFF !important;
+}
+
+input[type="radio"]:hover,
+[data-testid="stRadio"] input[type="radio"]:hover {
+    border-color: #B19CD9 !important;
+}
+
+[role="radiogroup"] label,
+[data-testid="stRadio"] label {
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 8px 0 !important;
+    color: #FFFFFF !important;
+}
+
+[role="radiogroup"] span,
+[data-testid="stRadio"] span {
+    color: #FFFFFF !important;
+}
+
+/* Download buttons (Classify tab result dataframes) - match app button style */
+[data-testid="stDownloadButton"] button,
+.stDownloadButton button {
+    background-color: transparent !important;
+    color: #FFFFFF !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+[data-testid="stDownloadButton"] button:hover,
+.stDownloadButton button:hover {
+    background-color: transparent !important;
+    color: #B19CD9 !important;
+    border: 2px solid #B19CD9 !important;
+}
+
+[data-testid="stDownloadButton"] button p,
+.stDownloadButton button p {
+    color: inherit !important;
+}
+
+/* All buttons purple hover */
+button:hover {
+    border: 2px solid #B19CD9 !important;
+}
+
+/* ============================================================================
+   Hide dataframe toolbar buttons (ensure they stay hidden in dark theme)
+   ============================================================================ */
+
+button[title="Show/hide columns"],
+button[aria-label="Show/hide columns"],
+div[data-testid="stDataFrame"] button[title="Show/hide columns"],
+div[data-testid="stDataFrame"] button[aria-label="Show/hide columns"],
+div[data-testid="stDataEditor"] button[title="Show/hide columns"],
+div[data-testid="stDataEditor"] button[aria-label="Show/hide columns"],
+div[data-testid="stElementToolbar"] button[title*="Show/hide"],
+div[data-testid="stElementToolbar"] button[aria-label*="Show/hide"],
+div[role="dialog"][aria-label="Show/hide columns"],
+div[role="menu"][aria-label="Show/hide columns"] {
+    display: none !important;
+}
+
+button[title="Download as CSV"],
+button[aria-label="Download as CSV"],
+div[data-testid="stDataFrame"] button[title="Download as CSV"],
+div[data-testid="stDataFrame"] button[aria-label="Download as CSV"],
+div[data-testid="stElementToolbar"] button[title*="Download"],
+div[data-testid="stElementToolbar"] button[aria-label*="Download"],
+div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[title*="Download"],
+div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[aria-label*="Download"],
+div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[title*="download"],
+div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[aria-label*="download"] {
+    display: none !important;
+}
+
+/* ============================================================================
+   Classify tab specific (purple alert boxes, file uploader hover)
+   ============================================================================ */
+
+div[data-testid="stAlert"] {
+    background-color: #2b0a3d !important;
+    color: #FFFFFF !important;
+    border-radius: 8px !important;
+}
+
+div[data-testid="stAlert"] p {
+    color: #FFFFFF !important;
+}
+
+[data-testid="stFileUploader"] button:hover {
+    color: #B19CD9 !important;
+    border: 2px solid #B19CD9 !important;
+}
+
+[data-testid="stFileUploader"] button:hover * {
+    color: #B19CD9 !important;
+}

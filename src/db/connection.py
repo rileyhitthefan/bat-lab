@@ -1,10 +1,9 @@
-# connection.py
+# connection.py - SQLite backend (legacy). Prefer src.db.save_data for MySQL.
 import sqlite3
 import streamlit as st
 import pandas as pd
 
 
-# Sends training calls to DB from UI
 def send_training_data():
     """
     Saves detector and species data from session state to the Batlab.sql database.
@@ -26,25 +25,22 @@ def send_training_data():
             cursor.executemany('INSERT INTO bats (Abbreviation, LatinName, CommonName) VALUES (?, ?, ?)', species_data)
             st.session_state.species = [] # Clear session state after saving
 
-        # Save Testing Data
-        if st.session_state.training_entries:
-            species_data = [(t['Species'], t['Location'], t['file']) for t in st.session_state.species]
-            cursor.executemany('INSERT INTO bats (Species, Location, File) VALUES (?, ?, ?)', species_data)
-            st.session_state.species = [] # Clear session state after saving
+        # Training data: use save_data.save_training_entries() for MySQL. SQLite schema
+        # (Locations/Bats) does not support training_entries; that belongs in Call_Library.
 
         conn.commit()
-        st.success("✅ Data saved to database.")
+        st.success("Data saved to database.")
 
     except sqlite3.Error as e:
-        st.error(f"❌ Database error: {e}")
+        st.error(f"Database error: {e}")
     except Exception as e:
-        st.error(f"❌ An unexpected error occurred: {e}")
+        st.error(f"An unexpected error occurred: {e}")
     finally:
         if conn:
             conn.close()
 
 # Pulls training calls from DB to run in ML model
-def get_call_library_data(self, location=None):
+def get_call_library_data(location=None):
     conn = None  # Initialize connection to None
 
     try:
@@ -63,11 +59,10 @@ def get_call_library_data(self, location=None):
         # display(call_library_df.head())
 
     except FileNotFoundError:
-        print(f"Error: The database file was not found at {db_path}")
+        print("Error: The database file was not found.")
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:
         # Close the database connection
         if 'conn' in locals() and conn:
             conn.close()
-
