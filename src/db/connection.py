@@ -15,7 +15,7 @@ config = {
 }
 
 # Sends training calls to DB from UI
-def send_training_data(input_field):
+def send_training_data():
     """
     Saves detector, species, and training data from session state to the Batlab.sql database.
     """
@@ -25,19 +25,19 @@ def send_training_data(input_field):
         cursor = conn.cursor()
 
         # Save Detectors
-        if input_field == "detectors" and st.session_state.detectors:
+        if st.session_state.detectors:
             detector_data = [(d['Detector'], d['Latitude'], d['Longitude']) for d in st.session_state.detectors]
             cursor.executemany('INSERT INTO locations (Area_name, Latitude, Longitude) VALUES (%s, %s, %s)', detector_data)
             st.session_state.detectors = [] # Clear session state after saving
 
         # Save Species
-        if input_field == "species" and st.session_state.species:
+        if st.session_state.species:
             species_data = [(s['Abbreviation'], s['LatinName'], s['CommonName']) for s in st.session_state.species]
             cursor.executemany('INSERT INTO bats (Abbreviation, LatinName, CommonName) VALUES (%s, %s, %s)', species_data)
             st.session_state.species = [] # Clear session state after saving
 
         # Save Training Data
-        if input_field == "training_data" and st.session_state.training_entries:
+        if st.session_state.training_entries:
             training_data = [(t['Species'], t['Location'], t['file']) for t in st.session_state.training_entries]
             cursor.executemany('INSERT INTO bats (Species, Location, File) VALUES (%s, %s, %s)', training_data)
             st.session_state.training_entries = [] # Clear session state after saving
