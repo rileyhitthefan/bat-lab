@@ -1566,7 +1566,7 @@ with tab5:
                 if info["species"]:
                     st.markdown(f"- **{det_id}**: {', '.join(info['species'])}")
                 else:
-                    st.markdown(f"- **{det_id}**: ⚠️ No species selected")
+                    st.markdown(f"- **{det_id}**: No species selected")
                     all_valid = False
 
             st.markdown("")
