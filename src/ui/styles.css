@@ -206,10 +206,20 @@ label {
     font-weight: 800 !important;
 }
 
+/* Bold widget labels (Username, Password, etc.) */
+[data-testid="stWidgetLabel"] p {
+    font-weight: bold !important;
+}
+
 /* Bold the Login button text */
 [data-testid="stFormSubmitButton"] button p,
 button[kind="formSubmit"] p {
-    font-weight: 800 !important;
+    font-weight: bold !important;
+}
+
+/* Bold Save Training Data button */
+.stButton > button p {
+    font-weight: bold !important;
 }
 
 /* Make button text bold */
@@ -248,6 +258,28 @@ button {
 [data-testid="stForm"] {
     background-color: #FFFFFF !important;
     border: 1px solid #E0E0E0 !important;
+}
+
+/* Purple checkboxes */
+[data-testid="stCheckbox"] input[type="checkbox"] {
+    accent-color: #B19CD9 !important;
+}
+[data-baseweb="checkbox"] span {
+    background-color: #B19CD9 !important;
+    border-color: #B19CD9 !important;
+    outline-color: #B19CD9 !important;
+}
+[data-baseweb="checkbox"] span:hover {
+    background-color: #9b7fc7 !important;
+    border-color: #9b7fc7 !important;
+}
+[role="checkbox"][aria-checked="true"] {
+    background-color: #B19CD9 !important;
+    border-color: #B19CD9 !important;
+}
+[role="checkbox"][aria-checked="true"] span {
+    background-color: #B19CD9 !important;
+    border-color: #B19CD9 !important;
 }
 
 /* Tabs */

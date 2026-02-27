@@ -1,17 +1,78 @@
 import streamlit as st
 import pandas as pd
 import time
+from pathlib import Path
 
-from src.ui import inject_styles
 from src.ml.classify_app import classify_uploaded_files
+from src.ml.config import Config
 
 # ============================================================================
 # PAGE CONFIGURATION
 # ============================================================================
 st.set_page_config(page_title="Bat Acoustic Identification", layout="wide")
 
-# Inject base styles (light mode / login page)
-inject_styles(dark_theme=False)
+
+def inject_css(filename: str) -> None:
+    """Load a CSS file from src/ui/ and inject it into the page."""
+    path = Path(__file__).resolve().parent / "src" / "ui" / filename
+    if path.exists():
+        st.markdown(f"<style>\n{path.read_text(encoding='utf-8')}\n</style>", unsafe_allow_html=True)
+
+
+# Optional display names for species (manifest only has "label" = abbreviation)
+SPECIES_DISPLAY_NAMES: dict[str, tuple[str, str]] = {
+    "TAPMAU": ("Taphozous mauritianus", "Mauritian Tomb Bat"),
+    "TADAEG": ("Tadarida aegyptiaca", "Egyptian Free-tailed Bat"),
+    "OTOMAR": ("Otomops martiensseni", "Large-eared Free-tailed Bat"),
+    "SCODIN": ("Scotophilus dinganii", "African Yellow Bat"),
+    "MINNAT": ("Miniopterus natalensis", "Natal Long-fingered Bat"),
+    "NEOCAP": ("Neoromicia capensis", "Cape Serotine Bat"),
+    "MYOTRI": ("Myotis tricolor", "Temminck's Myotis"),
+    "NYCTHE": ("Nycteris thebaica", "Egyptian Slit-faced Bat"),
+    "RHICAP": ("Rhinolophus capensis", "Cape Horseshoe Bat"),
+    "EPTHOT": ("Eptesicus hotentottus", "Long-tailed Serotine Bat"),
+    "LAEBOT": ("Laephotis botswanae", "Botswana Long-eared Bat"),
+    "SCOVIR": ("Scotophilus viridis", "Greenish Yellow Bat"),
+}
+
+
+def load_species_from_manifest(project_root: Path, config_path: Path | None = None) -> list[dict] | None:
+    """
+    Load species list from the data manifest (filepath, label, location).
+    Tries project_root / config.manifest_csv, then project_root / scripts / data_manifest.csv.
+    Returns list of {Abbreviation, Latin Name, Common Name}, or None if no manifest found/empty.
+    """
+    config_path = config_path or (project_root / "configs" / "default.yaml")
+    if not config_path.exists():
+        return None
+    cfg = Config.from_yaml(config_path)
+    manifest_path = project_root / cfg.manifest_csv
+    if not manifest_path.exists():
+        manifest_path = project_root / "scripts" / "data_manifest.csv"
+    if not manifest_path.exists():
+        return None
+    try:
+        df = pd.read_csv(manifest_path)
+        if "label" not in df.columns or df.empty:
+            return None
+        labels = sorted(df["label"].dropna().astype(str).unique())
+        if not labels:
+            return None
+        out = []
+        for abbr in labels:
+            latin, common = SPECIES_DISPLAY_NAMES.get(abbr, ("", ""))
+            out.append({
+                "Abbreviation": abbr,
+                "Latin Name": latin or abbr,
+                "Common Name": common or "",
+            })
+        return out
+    except Exception:
+        return None
+
+
+# Inject base (light) styles
+inject_css("styles.css")
 
 # ============================================================================
 # SESSION STATE INITIALIZATION
@@ -25,9 +86,6 @@ if 'unknown_data' not in st.session_state:
 if 'uploaded_files' not in st.session_state:
     st.session_state.uploaded_files = []
 
-if 'uploaded_file_bytes' not in st.session_state:
-    st.session_state.uploaded_file_bytes = {}  # filename -> bytes
-
 if 'training_entries' not in st.session_state:
     st.session_state.training_entries = []
 
@@ -35,23 +93,42 @@ if 'training_file_bytes' not in st.session_state:
     st.session_state.training_file_bytes = {}  # filename -> bytes (accumulated across submissions)
 
 if 'detectors' not in st.session_state:
-    st.session_state.detectors = []
+    st.session_state.detectors = [
+        {"Detector ID": "DET-KZN01", "Latitude": "-29.8587", "Longitude": "31.0218"},
+        {"Detector ID": "DET-WC02", "Latitude": "-33.9249", "Longitude": "18.4241"},
+        {"Detector ID": "DET-GP03", "Latitude": "-26.2041", "Longitude": "28.0473"},
+        {"Detector ID": "DET-LP04", "Latitude": "-23.8962", "Longitude": "29.4486"},
+        {"Detector ID": "DET-EC05", "Latitude": "-33.0153", "Longitude": "27.9116"},
+        {"Detector ID": "DET-MP06", "Latitude": "-25.4753", "Longitude": "30.9694"},
+        {"Detector ID": "DET-NC07", "Latitude": "-28.7282", "Longitude": "24.7499"},
+        {"Detector ID": "DET-NW08", "Latitude": "-25.8553", "Longitude": "25.6415"},
+        {"Detector ID": "DET-FS09", "Latitude": "-29.1217", "Longitude": "26.2141"},
+    ]
 
 if 'species' not in st.session_state:
-    st.session_state.species = [
-        {"Abbreviation": "TAPMAU", "Latin Name": "", "Common Name": ""},
-        {"Abbreviation": "TADAEG", "Latin Name": "", "Common Name": ""},
-        {"Abbreviation": "OTOMAR", "Latin Name": "", "Common Name": ""},
-        {"Abbreviation": "SCODIN", "Latin Name": "", "Common Name": ""},
-        {"Abbreviation": "MINNAT", "Latin Name": "", "Common Name": ""},
-        {"Abbreviation": "NEOCAP", "Latin Name": "", "Common Name": ""},
-        {"Abbreviation": "MYOTRI", "Latin Name": "", "Common Name": ""},
-        {"Abbreviation": "NYCTHE", "Latin Name": "", "Common Name": ""},
-        {"Abbreviation": "RHICAP", "Latin Name": "", "Common Name": ""},
-    ]
+    _project_root = Path(__file__).resolve().parent
+    _species = load_species_from_manifest(_project_root)
+    if _species:
+        st.session_state.species = _species
+    else:
+        # Fallback when no manifest exists yet (e.g. before any training)
+        st.session_state.species = [
+            {"Abbreviation": "TAPMAU", "Latin Name": "Taphozous mauritianus", "Common Name": "Mauritian Tomb Bat"},
+            {"Abbreviation": "TADAEG", "Latin Name": "Tadarida aegyptiaca", "Common Name": "Egyptian Free-tailed Bat"},
+            {"Abbreviation": "OTOMAR", "Latin Name": "Otomops martiensseni", "Common Name": "Large-eared Free-tailed Bat"},
+            {"Abbreviation": "SCODIN", "Latin Name": "Scotophilus dinganii", "Common Name": "African Yellow Bat"},
+            {"Abbreviation": "MINNAT", "Latin Name": "Miniopterus natalensis", "Common Name": "Natal Long-fingered Bat"},
+            {"Abbreviation": "NEOCAP", "Latin Name": "Neoromicia capensis", "Common Name": "Cape Serotine Bat"},
+            {"Abbreviation": "MYOTRI", "Latin Name": "Myotis tricolor", "Common Name": "Temminck's Myotis"},
+            {"Abbreviation": "NYCTHE", "Latin Name": "Nycteris thebaica", "Common Name": "Egyptian Slit-faced Bat"},
+            {"Abbreviation": "RHICAP", "Latin Name": "Rhinolophus capensis", "Common Name": "Cape Horseshoe Bat"},
+        ]
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
+
+if 'training_uploader_key' not in st.session_state:
+    st.session_state.training_uploader_key = 0
 
 if 'file_uploader_key' not in st.session_state:
     st.session_state.file_uploader_key = 0
@@ -79,31 +156,56 @@ if 'unk_folder_result' not in st.session_state:
 # HELPER FUNCTIONS
 # ============================================================================
 
-def process_audio_files(uploaded_files):
-    """Process uploaded audio files and classify them as KNOWN or UNKNOWN using the ML model."""
-    return classify_uploaded_files(uploaded_files)
+
+def _file_like_from_disk(source_folder: str, filename: str):
+    """Build a file-like object (with .name and .getvalue()) for classify_uploaded_files."""
+    path = Path(source_folder) / filename
+    if not path.is_file():
+        return None
+
+    class FileLike:
+        def __init__(self, name: str, path: Path):
+            self.name = name
+            self._path = path
+
+        def getvalue(self):
+            return self._path.read_bytes()
+
+    return FileLike(filename, path)
+
+
+def process_audio_files(source_folder: str, wav_filenames: list[str]):
+    """
+    Classify .wav files from the given folder using the ML model (classify_app).
+    Returns (known_df, unknown_df) with columns Filename, Species Prediction, Confidence Level.
+    """
+    file_objects = []
+    missing_or_skipped = []
+
+    for fn in wav_filenames:
+        if not fn.lower().endswith(".wav"):
+            missing_or_skipped.append({"Filename": fn})
+            continue
+        fl = _file_like_from_disk(source_folder, fn)
+        if fl is not None:
+            file_objects.append(fl)
+        else:
+            missing_or_skipped.append({"Filename": fn})
+
+    known_df, unknown_df = classify_uploaded_files(file_objects)
+
+    if missing_or_skipped:
+        unknown_df = pd.concat(
+            [unknown_df, pd.DataFrame(missing_or_skipped)],
+            ignore_index=True,
+        )
+
+    return known_df, unknown_df
 
 
 def convert_df_to_csv(df):
     """Convert a DataFrame to CSV format for download."""
     return df.to_csv(index=False).encode('utf-8')
-
-
-def build_zip(filenames, file_bytes_dict):
-    """
-    Build an in-memory zip containing the given filenames.
-    Returns bytes of the zip, or None if no files could be found.
-    """
-    import io, zipfile
-    buf = io.BytesIO()
-    found = 0
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fname in filenames:
-            if fname in file_bytes_dict:
-                zf.writestr(fname, file_bytes_dict[fname])
-                found += 1
-    buf.seek(0)
-    return buf.read() if found > 0 else None
 
 
 def organise_files(source_folder, identified_folder, unknown_folder,
@@ -183,7 +285,7 @@ if not st.session_state.logged_in:
     
     with col2:
         # Display BatLab logo
-        st.image("batlablogo.PNG", use_container_width =True)
+        st.image("batlablogo.PNG", use_container_width=True)
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("<h2 style='text-align: center; color: #000000; font-weight: bold;'>Please Login</h2>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
@@ -211,7 +313,7 @@ if not st.session_state.logged_in:
 # ============================================================================
 
 if st.session_state.logged_in:
-    inject_styles(dark_theme=True)
+    inject_css("theme_dark.css")
 
 # Header
 st.title("Welcome to the BatLab!")
@@ -219,16 +321,16 @@ st.markdown("Analyze bat acoustic calls and identify species using machine learn
 st.markdown("---")
 
 # Create tabs
-tab1, tab2, tab3, tab4 = st.tabs(["Classify", "Add Detector", "Add Species", "Add Training Data"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Classify", "Add Detector", "Add Species", "Add Training Data", "Train New Model"])
 
 # ============================================================================
 # TAB 1: CLASSIFY
 # ============================================================================
 with tab1:
     st.markdown("---")
-    st.header("Upload and Classify Bat Acoustic Calls")
-    
-    # Add Start New Session button only when there's data
+    st.header("Classify Bat Acoustic Calls")
+
+    # ── Start New Session ────────────────────────────────────────────────────
     if not st.session_state.known_data.empty or not st.session_state.unknown_data.empty:
         col1, col2 = st.columns([3, 1])
         with col2:
@@ -236,78 +338,105 @@ with tab1:
                 st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
                 st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
                 st.session_state.uploaded_files = []
-                st.session_state.uploaded_file_bytes = {}
                 st.session_state.org_result_msg = None
                 st.session_state.source_folder  = ""
                 st.session_state.show_id_folder_form  = False
                 st.session_state.show_unk_folder_form = False
                 st.session_state.id_folder_result  = None
                 st.session_state.unk_folder_result = None
-                # Increment the key to force recreate the file uploader
                 st.session_state.file_uploader_key += 1
                 st.success("✅ Session reset! Ready for new files.")
                 st.rerun()
-    
+
     st.markdown("---")
 
-    with st.form("file_upload_form"):
-        uploaded = st.file_uploader(
-            "Choose .wav files (max 200MB each)",
-            type=['wav'],
-            accept_multiple_files=True,
-            key=f'main_file_uploader_{st.session_state.file_uploader_key}'
+    # ── STEP 1: Source folder path ───────────────────────────────────────────
+    st.markdown("### Step 1 — Enter the source folder path")
+
+    import os
+    source_input = st.text_input(
+        "Source folder path *",
+        value=st.session_state.source_folder,
+        placeholder=r"e.g.  /Users/you/BatRecordings  or  C:\BatRecordings",
+        key="source_folder_input"
+    )
+    if st.button("**Verify Path & Load Files**", use_container_width=True):
+        source_input = (source_input or "").strip()
+        if not source_input:
+            st.error("Please enter a folder path.")
+        elif not os.path.isdir(source_input):
+            st.error(f"Path not found or is not a folder: '{source_input}'")
+        else:
+            wav_files = [f for f in os.listdir(source_input)
+                         if f.lower().endswith('.wav')]
+            if not wav_files:
+                st.warning(f"No .wav files found in '{source_input}'.")
+            else:
+                st.session_state.source_folder = source_input
+                st.session_state.uploaded_files = wav_files
+                # Reset results if the folder changed
+                st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
+                st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
+                st.session_state.id_folder_result  = None
+                st.session_state.unk_folder_result = None
+                st.success(f"✅ Found {len(wav_files)} .wav file(s) in '{source_input}'.")
+                st.rerun()
+
+    # Show current verified folder and file count
+    if st.session_state.source_folder and st.session_state.uploaded_files:
+        st.info(f"**Source:** `{st.session_state.source_folder}` — "
+                f"**{len(st.session_state.uploaded_files)}** .wav file(s) ready for classification.")
+
+    st.markdown("---")
+
+    # ── STEP 2: Classify ─────────────────────────────────────────────────────
+    st.markdown("### Step 2 — Classify")
+
+    classify_disabled = not bool(st.session_state.source_folder and st.session_state.uploaded_files)
+
+    with st.form("classify_form"):
+        submitted = st.form_submit_button(
+            "Classify",
+            use_container_width=True,
+            disabled=classify_disabled
         )
 
-        submitted = st.form_submit_button("Classify", use_container_width=True)
+        if submitted and not classify_disabled:
+            with st.spinner("Analyzing audio files… Please wait."):
+                known_df, unknown_df = process_audio_files(
+                    st.session_state.source_folder,
+                    st.session_state.uploaded_files,
+                )
 
-        if submitted:
-            if not uploaded:
-                st.warning("Please upload at least one file before classifying.")
-            else:
-                oversized = []
-                for f in uploaded:
-                    size_mb = f.size / (1024 * 1024)
-                    if size_mb > 200:
-                        oversized.append(f"{f.name} ({size_mb:.1f} MB)")
-
-                if oversized:
-                    st.error(f"The following files exceed the 200MB limit: {', '.join(oversized)}")
-                else:
-                    with st.spinner("Analyzing audio files... Please wait."):
-                        known_df, unknown_df = process_audio_files(uploaded)
-
-                        if not known_df.empty:
-                            st.session_state.known_data = pd.concat(
-                                [st.session_state.known_data, known_df], ignore_index=True
-                            )
-                        if not unknown_df.empty:
-                            st.session_state.unknown_data = pd.concat(
-                                [st.session_state.unknown_data, unknown_df], ignore_index=True
-                            )
-
-                        st.session_state.uploaded_files.extend([f.name for f in uploaded])
-                        for f in uploaded:
-                            f.seek(0)
-                            st.session_state.uploaded_file_bytes[f.name] = f.read()
-
-                    st.success(f"✅ Classification complete! Processed {len(uploaded)} file(s).")
-                    st.rerun()
+                if not known_df.empty:
+                    st.session_state.known_data = pd.concat(
+                        [st.session_state.known_data, known_df], ignore_index=True
+                    )
+                if not unknown_df.empty:
+                    st.session_state.unknown_data = pd.concat(
+                        [st.session_state.unknown_data, unknown_df], ignore_index=True
+                    )
+            st.success(f"✅ Classification complete! Processed {len(st.session_state.uploaded_files)} file(s).")
+            st.rerun()
 
     st.markdown("---")
 
-    # -----------------------------------------------------------------------
-    # IDENTIFIED SPECIES TABLE + FOLDER BUTTON
-    # -----------------------------------------------------------------------
+    # ── IDENTIFIED SPECIES TABLE + MOVE-TO-FOLDER ────────────────────────────
     if not st.session_state.known_data.empty:
-        st.subheader("✅ Identified Species")
+        known_count = len(st.session_state.known_data)
+        st.subheader(f"😄 Identified Species — {known_count} file{'s' if known_count != 1 else ''}")
         st.dataframe(
             st.session_state.known_data,
             use_container_width=True,
             hide_index=True,
-            height=400
+            height=400,
+            column_config={
+                "Filename": st.column_config.TextColumn("Filename"),
+                "Species Prediction": st.column_config.TextColumn("Species Prediction"),
+                "Confidence Level": st.column_config.TextColumn("Confidence Level"),
+            }
         )
 
-        # Button to reveal the folder form
         if st.button("**Create New Folder for Identified Sound Files**",
                      key="btn_id_folder", use_container_width=True):
             st.session_state.show_id_folder_form = not st.session_state.show_id_folder_form
@@ -315,14 +444,16 @@ with tab1:
 
         if st.session_state.show_id_folder_form:
             with st.form("id_folder_form"):
-                st.markdown("**Name your new folder**")
-                id_folder_name = st.text_input(
-                    "Folder name *",
-                    placeholder="e.g.  Identified_Bats_June2025"
+                st.markdown("**Enter the full path for the new identified species folder**")
+                st.markdown("The folder will be created if it does not exist, and files will be "
+                            "**moved** from the source folder.")
+                id_folder_path = st.text_input(
+                    "Destination folder path *",
+                    placeholder=r"e.g.  /Users/you/Identified_Bats  or  C:\Identified_Bats"
                 )
                 col_save_id, col_cancel_id = st.columns(2)
                 with col_save_id:
-                    confirm_id = st.form_submit_button("**Create & Download**", use_container_width=True)
+                    confirm_id = st.form_submit_button("**Create Folder & Move Files**", use_container_width=True)
                 with col_cancel_id:
                     cancel_id = st.form_submit_button("**Cancel**", use_container_width=True)
 
@@ -331,56 +462,58 @@ with tab1:
                     st.rerun()
 
                 if confirm_id:
-                    id_folder_name = (id_folder_name or "").strip()
-                    if not id_folder_name:
-                        st.error("Please enter a folder name.")
+                    import os, shutil
+                    id_folder_path = (id_folder_path or "").strip()
+                    if not id_folder_path:
+                        st.error("Please enter a destination folder path.")
+                    elif os.path.abspath(id_folder_path) == os.path.abspath(st.session_state.source_folder):
+                        st.error("Destination must be different from the source folder.")
                     else:
                         known_names = st.session_state.known_data['Filename'].tolist()
-                        zip_bytes = build_zip(
-                            known_names,
-                            st.session_state.uploaded_file_bytes
-                        )
+                        try:
+                            os.makedirs(id_folder_path, exist_ok=True)
+                        except Exception as exc:
+                            st.error(f"Could not create folder: {exc}")
+                            st.stop()
+                        moved, failed = [], []
+                        for fname in known_names:
+                            src = os.path.join(st.session_state.source_folder, fname)
+                            dst = os.path.join(id_folder_path, fname)
+                            if not os.path.isfile(src):
+                                failed.append(f"{fname} (not found in source)")
+                                continue
+                            try:
+                                shutil.move(src, dst)
+                                moved.append(fname)
+                            except Exception as exc:
+                                failed.append(f"{fname} ({exc})")
                         st.session_state.id_folder_result = {
-                            "zip":        zip_bytes,
-                            "folder_name": id_folder_name,
-                            "count":      len(known_names),
+                            "path": id_folder_path,
+                            "moved": moved,
+                            "failed": failed,
                         }
                         st.session_state.show_id_folder_form = False
                         st.rerun()
 
-        # Show download button once zip is ready
         if st.session_state.id_folder_result:
             res = st.session_state.id_folder_result
-            if res["zip"]:
+            if res["moved"]:
                 st.success(
-                    f"Folder **{res['folder_name']}** is ready — "
-                    f"{res['count']} file(s) packed."
+                    f"Moved **{len(res['moved'])}** file(s) to `{res['path']}`."
                 )
-                st.download_button(
-                    label=f"**Download  {res['folder_name']}.zip**",
-                    data=res["zip"],
-                    file_name=f"{res['folder_name']}.zip",
-                    mime="application/zip",
-                    use_container_width=True,
-                    key="dl_id_zip"
-                )
-            else:
-                st.warning(
-                    "No audio data found to package. "
-                    "Files may have been uploaded in a previous session — "
-                    "please re-upload and classify them to use this feature."
-                )
+            if res["failed"]:
+                st.warning("The following files could not be moved:\n" +
+                           "\n".join(f"• {f}" for f in res["failed"]))
 
     else:
-        st.info("No identified species yet. Upload files to get started!")
+        st.info("No identified species yet. Verify a source folder and run classify to get started!")
 
     st.markdown("---")
 
-    # -----------------------------------------------------------------------
-    # UNKNOWN SPECIES TABLE + FOLDER BUTTON
-    # -----------------------------------------------------------------------
+    # ── UNKNOWN SPECIES TABLE + MOVE-TO-FOLDER ───────────────────────────────
     if not st.session_state.unknown_data.empty:
-        st.subheader("❓ Unknown Species")
+        unknown_count = len(st.session_state.unknown_data)
+        st.subheader(f"🤔 Unknown Species — {unknown_count} file{'s' if unknown_count != 1 else ''}")
         st.dataframe(
             st.session_state.unknown_data,
             use_container_width=True,
@@ -388,7 +521,6 @@ with tab1:
             height=400
         )
 
-        # Button to reveal the folder form
         if st.button("**Create New Folder for Unknown Sound Files**",
                      key="btn_unk_folder", use_container_width=True):
             st.session_state.show_unk_folder_form = not st.session_state.show_unk_folder_form
@@ -396,14 +528,16 @@ with tab1:
 
         if st.session_state.show_unk_folder_form:
             with st.form("unk_folder_form"):
-                st.markdown("**Name your new folder**")
-                unk_folder_name = st.text_input(
-                    "Folder name *",
-                    placeholder="e.g.  Unknown_Bats_June2025"
+                st.markdown("**Enter the full path for the new unknown species folder**")
+                st.markdown("The folder will be created if it does not exist, and files will be "
+                            "**moved** from the source folder.")
+                unk_folder_path = st.text_input(
+                    "Destination folder path *",
+                    placeholder=r"e.g.  /Users/you/Unknown_Bats  or  C:\Unknown_Bats"
                 )
                 col_save_unk, col_cancel_unk = st.columns(2)
                 with col_save_unk:
-                    confirm_unk = st.form_submit_button("**Create & Download**", use_container_width=True)
+                    confirm_unk = st.form_submit_button("**Create Folder & Move Files**", use_container_width=True)
                 with col_cancel_unk:
                     cancel_unk = st.form_submit_button("**Cancel**", use_container_width=True)
 
@@ -412,45 +546,48 @@ with tab1:
                     st.rerun()
 
                 if confirm_unk:
-                    unk_folder_name = (unk_folder_name or "").strip()
-                    if not unk_folder_name:
-                        st.error("Please enter a folder name.")
+                    import os, shutil
+                    unk_folder_path = (unk_folder_path or "").strip()
+                    if not unk_folder_path:
+                        st.error("Please enter a destination folder path.")
+                    elif os.path.abspath(unk_folder_path) == os.path.abspath(st.session_state.source_folder):
+                        st.error("Destination must be different from the source folder.")
                     else:
                         unknown_names = st.session_state.unknown_data['Filename'].tolist()
-                        zip_bytes = build_zip(
-                            unknown_names,
-                            st.session_state.uploaded_file_bytes
-                        )
+                        try:
+                            os.makedirs(unk_folder_path, exist_ok=True)
+                        except Exception as exc:
+                            st.error(f"Could not create folder: {exc}")
+                            st.stop()
+                        moved, failed = [], []
+                        for fname in unknown_names:
+                            src = os.path.join(st.session_state.source_folder, fname)
+                            dst = os.path.join(unk_folder_path, fname)
+                            if not os.path.isfile(src):
+                                failed.append(f"{fname} (not found in source)")
+                                continue
+                            try:
+                                shutil.move(src, dst)
+                                moved.append(fname)
+                            except Exception as exc:
+                                failed.append(f"{fname} ({exc})")
                         st.session_state.unk_folder_result = {
-                            "zip":         zip_bytes,
-                            "folder_name": unk_folder_name,
-                            "count":       len(unknown_names),
+                            "path": unk_folder_path,
+                            "moved": moved,
+                            "failed": failed,
                         }
                         st.session_state.show_unk_folder_form = False
                         st.rerun()
 
-        # Show download button once zip is ready
         if st.session_state.unk_folder_result:
             res = st.session_state.unk_folder_result
-            if res["zip"]:
+            if res["moved"]:
                 st.success(
-                    f"Folder **{res['folder_name']}** is ready — "
-                    f"{res['count']} file(s) packed."
+                    f"Moved **{len(res['moved'])}** file(s) to `{res['path']}`."
                 )
-                st.download_button(
-                    label=f"**Download  {res['folder_name']}.zip**",
-                    data=res["zip"],
-                    file_name=f"{res['folder_name']}.zip",
-                    mime="application/zip",
-                    use_container_width=True,
-                    key="dl_unk_zip"
-                )
-            else:
-                st.warning(
-                    "No audio data found to package. "
-                    "Files may have been uploaded in a previous session — "
-                    "please re-upload and classify them to use this feature."
-                )
+            if res["failed"]:
+                st.warning("The following files could not be moved:\n" +
+                           "\n".join(f"• {f}" for f in res["failed"]))
 
     st.markdown("---")
 
@@ -498,9 +635,22 @@ with tab2:
                 except ValueError:
                     errors.append("Longitude must be a valid number.")
 
+            if not errors:
+                # Check for duplicate: same ID, latitude, and longitude
+                duplicate = any(
+                    d["Detector ID"] == name and
+                    float(d["Latitude"]) == float(lat) and
+                    float(d["Longitude"]) == float(lon)
+                    for d in st.session_state.detectors
+                )
+                if duplicate:
+                    errors.append(
+                        f"A detector with ID '{name}', Latitude '{lat}', and Longitude '{lon}' already exists."
+                    )
+
             if errors:
                 for e in errors:
-                    st.error(f"Error: {e}")
+                    st.error(e)
             else:
                 st.session_state.detectors.append({
                     "Detector ID": name,
@@ -557,9 +707,20 @@ with tab3:
             if not latin:
                 errors.append("Latin Name is required.")
 
+            if not errors:
+                duplicate = any(
+                    s["Abbreviation"].lower() == abbr.lower() and
+                    s["Latin Name"].lower() == latin.lower()
+                    for s in st.session_state.species
+                )
+                if duplicate:
+                    errors.append(
+                        f"A species with abbreviation '{abbr}' and Latin name '{latin}' already exists."
+                    )
+
             if errors:
                 for e in errors:
-                    st.error(f"Error: {e}")
+                    st.error(e)
             else:
                 st.session_state.species.append({
                     "Abbreviation": abbr,
@@ -590,121 +751,113 @@ with tab4:
     st.header("Add Training Data")
     st.markdown("---")
 
-    placeholder_locations = ["Addo Elephant National Park", "Great Fish River Nature Reserve",
-                             "Amakhala Game Reserve", "Tanglewood Conservation Area"]
+    col_species, col_location = st.columns(2)
 
-    with st.form("add_training_form", clear_on_submit=False):
-        col_species, col_location = st.columns(2)
-
-        with col_species:
-            st.markdown("**Select Species:**")
-            species_search = st.text_input(
-                "Search species",
-                placeholder="Type to filter...",
-                key="species_search"
-            )
-
-            all_species = [s['Abbreviation'] for s in st.session_state.species]
-            filtered_species = [sp for sp in all_species
-                                if species_search.lower() in sp.lower()] if species_search else all_species
-
-            selected_species = st.radio(
-                "Species options",
-                options=filtered_species,
-                label_visibility="collapsed",
-                key="species_radio"
-            )
-
-        with col_location:
-            st.markdown("**Select Location:**")
-            location_search = st.text_input(
-                "Search location",
-                placeholder="Type to filter...",
-                key="location_search"
-            )
-
-            filtered_locations = [loc for loc in placeholder_locations
-                                  if
-                                  location_search.lower() in loc.lower()] if location_search else placeholder_locations
-
-            selected_location = st.radio(
-                "Location options",
-                options=filtered_locations,
-                label_visibility="collapsed",
-                key="location_radio"
-            )
-
-        st.markdown("---")
-
-        st.markdown("**Upload Training Audio Files (.wav, max 200MB per file):**")
-        training_files = st.file_uploader(
-            "Drop .wav files here",
-            type=['wav'],
-            accept_multiple_files=True,
-            key='training_file_uploader',
-            label_visibility="collapsed"
+    with col_species:
+        st.markdown("**Select Species:**")
+        species_search = st.text_input(
+            "Search species",
+            placeholder="Type to filter...",
+            key="species_search"
         )
 
-        if training_files:
-            oversized_files = []
+        all_species = [s['Abbreviation'] for s in st.session_state.species]
+        filtered_species = [sp for sp in all_species
+                            if species_search.lower() in sp.lower()] if species_search else all_species
+
+        selected_species = st.radio(
+            "Species options",
+            options=filtered_species if filtered_species else ["No species registered yet"],
+            label_visibility="collapsed",
+            key="species_radio"
+        )
+
+    with col_location:
+        st.markdown("**Select Detector:**")
+        detector_search = st.text_input(
+            "Search detector",
+            placeholder="Type to filter...",
+            key="detector_search"
+        )
+
+        all_detectors = [d["Detector ID"] for d in st.session_state.detectors]
+        filtered_detectors = [d for d in all_detectors
+                              if detector_search.lower() in d.lower()] if detector_search else all_detectors
+
+        selected_detector = st.radio(
+            "Detector options",
+            options=filtered_detectors if filtered_detectors else ["No detectors registered yet"],
+            label_visibility="collapsed",
+            key="detector_radio"
+        )
+
+    st.markdown("---")
+
+    st.markdown("**Upload Training Audio Files (.wav, max 200MB per file):**")
+    training_files = st.file_uploader(
+        "Drop .wav files here",
+        type=['wav'],
+        accept_multiple_files=True,
+        key=f'training_file_uploader_{st.session_state.training_uploader_key}',
+        label_visibility="collapsed"
+    )
+
+    if training_files:
+        oversized_files = []
+        for f in training_files:
+            file_size_mb = f.size / (1024 * 1024)
+            if file_size_mb > 200:
+                oversized_files.append(f"{f.name} ({file_size_mb:.1f}MB)")
+        if oversized_files:
+            st.error(f"The following files exceed 200MB limit: {', '.join(oversized_files)}")
+        else:
+            st.info(f"{len(training_files)} training file(s) selected")
+
+    st.markdown("---")
+
+    submitted_training = st.button("Save Training Data", use_container_width=True, type="primary")
+
+    if submitted_training:
+        errors = []
+        if not st.session_state.species:
+            errors.append("No species registered. Please register at least one species first.")
+        if not st.session_state.detectors:
+            errors.append("No detectors registered. Please register at least one detector first.")
+        if not training_files:
+            errors.append("Please upload at least one .wav file.")
+        else:
+            oversized = [f for f in training_files if f.size / (1024 * 1024) > 200]
+            if oversized:
+                errors.append("Cannot save: Some files exceed the 200MB limit.")
+        if errors:
+            for e in errors:
+                st.error(e)
+        else:
+            new_file_names = []
             for f in training_files:
-                file_size_mb = f.size / (1024 * 1024)
-                if file_size_mb > 200:
-                    oversized_files.append(f"{f.name} ({file_size_mb:.1f}MB)")
+                file_bytes = f.read()
+                st.session_state.training_file_bytes[f.name] = file_bytes
+                new_file_names.append(f.name)
 
-            if oversized_files:
-                st.error(f"The following files exceed 200MB limit: {', '.join(oversized_files)}")
-            else:
-                st.info(f"{len(training_files)} training file(s) selected")
-
-        st.markdown("---")
-
-        col_save, col_cancel = st.columns(2)
-        with col_save:
-            submitted_training = st.form_submit_button("Save Training Data", use_container_width=True)
-        with col_cancel:
-            cancel_training = st.form_submit_button("Cancel", use_container_width=True)
-
-        if submitted_training:
-            if not training_files:
-                st.error("Please upload at least one .wav file.")
-            else:
-                oversized = [f for f in training_files if f.size / (1024 * 1024) > 200]
-                if oversized:
-                    st.error("Cannot save: Some files exceed the 200MB limit.")
-                else:
-                    # Append file bytes into session state (accumulates across submissions)
-                    new_file_names = []
-                    for f in training_files:
-                        file_bytes = f.read()
-                        st.session_state.training_file_bytes[f.name] = file_bytes
-                        new_file_names.append(f.name)
-
-                    st.session_state.training_entries.append({
-                        "Species": selected_species,
-                        "Location": selected_location,
-                        "FileCount": len(training_files),
-                        "FileNames": new_file_names
-                    })
-                    total_files = len(st.session_state.training_file_bytes)
-                    st.success(
-                        f"Training data saved: {len(training_files)} file(s) for {selected_species} at {selected_location}. "
-                        f"Total accumulated files: {total_files}")
-                    st.rerun()
-
-        if cancel_training:
-            st.info("Cancelled - no changes made.")
+            st.session_state.training_entries.append({
+                "Species": selected_species,
+                "Detector": selected_detector,
+                "FileCount": len(training_files),
+                "FileNames": new_file_names
+            })
+            st.session_state.training_uploader_key += 1
+            st.success(
+                f"Training data saved: {len(training_files)} file(s) for {selected_species} at detector '{selected_detector}'.")
+            st.rerun()
 
     st.markdown("---")
 
     # Show training data entries
     if st.session_state.training_entries:
         st.subheader("Training Data Entries")
-        total_accumulated = len(st.session_state.training_file_bytes)
-        st.info(f"Total accumulated files in session: **{total_accumulated}**")
         training_df = pd.DataFrame([{
             "Species": entry["Species"],
-            "Location": entry["Location"],
+            "Detector": entry.get("Detector", entry.get("Location", "")),
             "Files": entry["FileCount"]
         } for entry in st.session_state.training_entries])
         st.dataframe(
@@ -715,3 +868,106 @@ with tab4:
         )
     else:
         st.info("No training data entries yet. Add your first training dataset above!")
+
+# ============================================================================
+# TAB 5: TRAIN NEW MODEL
+# ============================================================================
+with tab5:
+    st.markdown("---")
+    st.header("Train New Model")
+    st.markdown("---")
+
+    if not st.session_state.detectors:
+        st.info("No detectors registered yet. Please add detectors in the 'Add Detector' tab first.")
+    elif not st.session_state.species:
+        st.info("No species registered yet. Please add species in the 'Add Species' tab first.")
+    else:
+        st.markdown("Select the detectors and species you want to include in the new model training run.")
+        st.markdown("---")
+
+        if "train_selections" not in st.session_state:
+            st.session_state.train_selections = {}
+
+        all_species_options = [s["Abbreviation"] for s in st.session_state.species]
+        all_detector_ids = [d["Detector ID"] for d in st.session_state.detectors]
+
+        # Detector search
+        detector_search = st.text_input(
+            "Search detectors",
+            placeholder="Type to filter detectors...",
+            key="train_detector_search"
+        )
+        st.markdown("---")
+
+        filtered_detectors = [
+            d for d in all_detector_ids
+            if detector_search.lower() in d.lower()
+        ] if detector_search else all_detector_ids
+
+        if not filtered_detectors:
+            st.info("No detectors match your search.")
+
+        for det_id in filtered_detectors:
+            # Initialise selection for this detector if not present
+            if det_id not in st.session_state.train_selections:
+                st.session_state.train_selections[det_id] = {
+                    "selected": False,
+                    "species": [],
+                    "species_search": ""
+                }
+
+            col_check, col_label = st.columns([0.05, 0.95])
+            with col_check:
+                selected = st.checkbox(
+                    "",
+                    value=st.session_state.train_selections[det_id]["selected"],
+                    key=f"det_check_{det_id}"
+                )
+            with col_label:
+                st.markdown(f"**{det_id}**")
+
+            st.session_state.train_selections[det_id]["selected"] = selected
+
+            if selected:
+                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;*Select species:*")
+                chosen_species = []
+                for sp in all_species_options:
+                    already = sp in st.session_state.train_selections[det_id]["species"]
+                    checked = st.checkbox(
+                        sp,
+                        value=already,
+                        key=f"sp_check_{det_id}_{sp}"
+                    )
+                    if checked:
+                        chosen_species.append(sp)
+                st.session_state.train_selections[det_id]["species"] = chosen_species
+
+            st.markdown("---")
+
+        # Summary and train button
+        active = {
+            det: info for det, info in st.session_state.train_selections.items()
+            if info["selected"]
+        }
+
+        if active:
+            st.markdown("**Selected for training:**")
+            all_valid = True
+            for det_id, info in active.items():
+                if info["species"]:
+                    st.markdown(f"- **{det_id}**: {', '.join(info['species'])}")
+                else:
+                    st.markdown(f"- **{det_id}**: No species selected")
+                    all_valid = False
+
+            st.markdown("")
+            if st.button("Train Model", use_container_width=True, type="primary"):
+                if not all_valid:
+                    st.error("Please select at least one species for each chosen detector before training.")
+                else:
+                    st.success(
+                        f"Training job submitted for {len(active)} detector(s): "
+                        + ", ".join(active.keys())
+                    )
+        else:
+            st.info("Select at least one detector above to configure your training run.")

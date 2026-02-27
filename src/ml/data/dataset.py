@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from .spectrograms import cache_mel_full, cache_mel_call
+from .spectrograms import cache_mel_full, cache_mel_call, cache_mel
 from .features import cache_numeric_features
 
 
@@ -44,7 +44,10 @@ class DatasetContext:
 
 
 class BatDataset(Dataset):
-    """Dataset that returns (x_full, x_call, label_idx, loc_idx, numeric_feats, filepath) per sample."""
+    """Dataset that returns (x, label_idx, loc_idx, numeric_feats, filepath) per sample.
+    
+    Uses single mel spectrogram (matches training notebook architecture).
+    """
 
     def __init__(self, df: pd.DataFrame, ctx: DatasetContext):
         self.df = df.reset_index(drop=True)
@@ -57,13 +60,10 @@ class BatDataset(Dataset):
         row = self.df.iloc[i]
         cfg_dict = _ctx_to_cfg_dict(self.ctx)
 
-        # Mel spectrograms (full clip + call window, cached)
-        mel_full_path = cache_mel_full(row.filepath, self.ctx.root_dir, cfg_dict)
-        mel_call_path = cache_mel_call(row.filepath, self.ctx.root_dir, cfg_dict)
-        mel_full = np.load(mel_full_path)
-        mel_call = np.load(mel_call_path)
-        x_full = torch.tensor(mel_full, dtype=torch.float32).unsqueeze(0)  # [1, n_mels, T]
-        x_call = torch.tensor(mel_call, dtype=torch.float32).unsqueeze(0)
+        # Mel spectrogram (single channel, matches training)
+        mel_path = cache_mel(row.filepath, self.ctx.root_dir, cfg_dict)
+        mel = np.load(mel_path)
+        x = torch.tensor(mel, dtype=torch.float32).unsqueeze(0)  # [1, n_mels, T]
 
         # Labels
         y = torch.tensor(self.ctx.label_to_idx[row.label], dtype=torch.long)
@@ -75,4 +75,4 @@ class BatDataset(Dataset):
         num_feats = (num_feats - self.ctx.feat_mean) / (self.ctx.feat_std + 1e-8)
         num_feats = torch.tensor(num_feats, dtype=torch.float32)
 
-        return x_full, x_call, y, loc, num_feats, row.filepath
+        return x, y, loc, num_feats, row.filepath

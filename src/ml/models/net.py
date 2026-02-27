@@ -1,6 +1,6 @@
 """
-Unified BatClassifier with mel spectrograms (full + call), location, and numeric features.
-Matches the pipeline used in MLModel2 notebook and inference.
+Unified BatClassifier with mel spectrogram, location, and numeric features.
+Matches the architecture used in training notebook.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def cross_entropy_loss(logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
 
 class BatClassifier(nn.Module):
-    """Unified model with mel (full + call), location, and numeric features."""
+    """Unified model with mel spec, location, and numeric features."""
 
     def __init__(
         self,
@@ -30,33 +30,62 @@ class BatClassifier(nn.Module):
         num_feat_dim: int,
         loc_embed_dim: int = 16,
         num_feat_hidden: int = 32,
-        dropout: float = 0.3,
+        dropout: float = 0.0,
     ):
         super().__init__()
 
-        # CNN for mel spectrogram (input: 2 channels = full + call concatenated)
+        # CNN for mel spectrogram (single channel input)
         self.conv = nn.Sequential(
-            nn.Conv2d(2, 32, 3, padding=1),
+            # Block 1: 1 -> 32
+            nn.Conv2d(1, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.MaxPool2d((2, 2)),
-            nn.Dropout2d(0.1),
-            nn.Conv2d(32, 64, 3, padding=1),
+            # During "force overfit" mode in the notebook this was set to 0.0
+            nn.Dropout2d(0.0),
+
+            # Block 2: 32 -> 64
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d((2, 2)),
-            nn.Dropout2d(0.1),
-            nn.Conv2d(64, 128, 3, padding=1),
+            nn.Dropout2d(0.0),
+
+            # Block 3: 64 -> 128
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d((2, 2)),
+            nn.Dropout2d(0.0),
+
+            # Block 4: 128 -> 256
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+
+            # Keep output size stable so the classifier input is easy
             nn.AdaptiveAvgPool2d((4, 4)),
         )
 
+        # Location embedding
         self.loc_embed = nn.Embedding(
             num_embeddings=max(1, n_locations),
             embedding_dim=loc_embed_dim,
         )
 
+        # Numeric feature encoder
         self.num_fc = nn.Sequential(
             nn.Linear(num_feat_dim, num_feat_hidden),
             nn.BatchNorm1d(num_feat_hidden),
@@ -64,7 +93,8 @@ class BatClassifier(nn.Module):
             nn.Dropout(dropout * 0.5),
         )
 
-        combined_dim = 128 * 4 * 4 + loc_embed_dim + num_feat_hidden
+        # Combined classifier
+        combined_dim = 256 * 4 * 4 + loc_embed_dim + num_feat_hidden
 
         self.fc = nn.Sequential(
             nn.Linear(combined_dim, 256),
@@ -82,13 +112,11 @@ class BatClassifier(nn.Module):
 
     def forward(
         self,
-        x_full: torch.Tensor,
-        x_call: torch.Tensor,
+        x: torch.Tensor,
         loc_ids: torch.Tensor,
         num_feats: torch.Tensor,
     ) -> torch.Tensor:
-        # x_full, x_call: [B, 1, n_mels, T]
-        x = torch.cat([x_full, x_call], dim=1)  # [B, 2, n_mels, T]
+        # x: [B, 1, n_mels, T]
         z = self.conv(x).flatten(1)
         le = self.loc_embed(loc_ids)
         nf = self.num_fc(num_feats)

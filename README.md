@@ -36,9 +36,16 @@ pip install -r requirements.txt
 ## Run
 
 - **UI:** `streamlit run app.py`
-- **Predict:** `python scripts/predict.py --wav path/to/file.wav --ckpt models/checkpoints/best_model.pt --data-root path/to/data --config configs/default.yaml --thresholds thresholds.yaml`
-- **Train:** `python scripts/train.py --data-root path/to/Bat\ Calls` (requires manifest/dataset modules)
+- **Build manifest** `python -m src.ml.scripts.train --data-root path/to/bat/calls`
+- **Train** `python -m src.ml.scripts.train --data-root path/to/bat/calls --manifest scripts/data_manifest.csv`
+- **Train with configs**:
+  `python -m src.ml.scripts.train \
+    --data-root path/to/bat/calls \
+    --config configs/default.yaml \
+    --min-samples 5 \
+    --test-size 0.3 \
+    --val-size 0.5`
 
 ## Colab
 
-https://colab.research.google.com/drive/10E7C46wI7LC_fU7LjXwGmOvYGLCOuaM4?usp=sharing
+https://colab.research.google.com/drive/1cX76dSk2g4pe60X0_PX_W5D2iN44MJLj?usp=sharing

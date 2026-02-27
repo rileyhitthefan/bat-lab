@@ -17,18 +17,30 @@ def run_epoch(model, loader, device: str, opt=None) -> Dict[str, float]:
     model.train() if is_train else model.eval()
     total_loss, total_acc, total_n = 0.0, 0.0, 0
     pbar = tqdm(loader, desc="train" if is_train else "val", leave=False)
-    for x_full, x_call, y, loc, num_feats, _ in pbar:
-        x_full, x_call = x_full.to(device), x_call.to(device)
+    # Handle both old format (x_full, x_call, ...) and new format (x, ...)
+    for batch in pbar:
+        if len(batch) == 6:
+            x_full, x_call, y, loc, num_feats, _ = batch
+            # Use x_full as the single mel input (or concatenate if needed)
+            # For compatibility with old dataset, use x_full
+            x = x_full.to(device)
+        elif len(batch) == 5:
+            # New format: (x, y, loc, num_feats, filepath)
+            x, y, loc, num_feats, _ = batch
+            x = x.to(device)
+        else:
+            raise ValueError(f"Unexpected batch format with {len(batch)} elements")
+        
         y, loc, num_feats = y.to(device), loc.to(device), num_feats.to(device)
         with torch.set_grad_enabled(is_train):
-            logits = model(x_full, x_call, loc, num_feats)
+            logits = model(x, loc, num_feats)
             loss = cross_entropy_loss(logits, y)
             if is_train:
                 opt.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 opt.step()
-        bs = x_full.size(0)
+        bs = x.size(0)
         total_loss += loss.item() * bs
         total_acc += accuracy(logits, y) * bs
         total_n += bs
@@ -36,7 +48,7 @@ def run_epoch(model, loader, device: str, opt=None) -> Dict[str, float]:
     return {"loss": total_loss/total_n, "acc": total_acc/total_n}
 
 def train_model(model, loaders: Dict[str, Any], device: str, lr: float, epochs: int, model_dir: str, meta: dict) -> TrainResult:
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", factor=0.5, patience=3)
     best_val, history, patience_counter = 0.0, [], 0
     best_path = os.path.join(model_dir, "best_model.pt")
@@ -50,6 +62,6 @@ def train_model(model, loaders: Dict[str, Any], device: str, lr: float, epochs: 
             torch.save({"model_state": model.state_dict(), "meta": meta}, best_path)
         else:
             patience_counter += 1
-            if patience_counter >= 7:
+            if patience_counter >= 30:
                 break
     return TrainResult(best_path=best_path, history=history)

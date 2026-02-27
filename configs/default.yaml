@@ -10,13 +10,13 @@ fmax: 120000
 batch_size: 32
 num_workers: 2
 lr: 0.0002
-epochs: 25
+epochs: 100
 
 model_dir: model_checkpoints
 cache_dir: cache_mels
 numfeat_cache_dir: cache_numfeats
-manifest_csv: data_manifest.csv
-thresholds_yaml: thresholds.yaml
-default_min_conf: 0.50
+manifest_csv: model_checkpoints/data_manifest.csv
+thresholds_yaml: model_checkpoints/thresholds.yaml
+default_min_conf: 0.6
 
 seed: 1337

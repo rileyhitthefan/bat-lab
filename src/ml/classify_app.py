@@ -47,6 +47,37 @@ def _build_upload_cfg_dict(cfg: Config, tmpdir: Path) -> dict:
     return d
 
 
+def _build_colab_upload_cfg_dict(tmpdir: Path) -> dict:
+    """
+    Build a config dict that matches the MLModel2 Colab notebook settings.
+
+    This is used when running inference with the Colab-trained checkpoint so
+    that the feature extraction pipeline (sampling rate, hop length, mel
+    parameters, frequency range, and default confidence threshold) matches the
+    environment where that model was originally trained and evaluated.
+    """
+    cache_dir = tmpdir / "cache_mels"
+    numfeat_cache_dir = tmpdir / "cache_numfeats"
+    cache_dir.mkdir(exist_ok=True)
+    numfeat_cache_dir.mkdir(exist_ok=True)
+    return {
+        # From MLModel2 CONFIG in the notebook
+        "sr": 48000,
+        "mono": True,
+        "duration_s": 1.0,
+        "hop_length": 128,
+        "n_fft": 2048,
+        "n_mels": 96,
+        "fmin": 2000,
+        "fmax": 90000,
+        # Per-call cache dirs inside the temp directory
+        "cache_dir": str(cache_dir),
+        "numfeat_cache_dir": str(numfeat_cache_dir),
+        # Notebook default minimum confidence
+        "default_min_conf": 0.70,
+    }
+
+
 def classify_uploaded_files(
     uploaded_files: list[Any],
     model_path: str | Path | None = None,
@@ -77,11 +108,33 @@ def classify_uploaded_files(
     cfg = Config.from_yaml(config_path)
     ensure_dirs(cfg, project_root)
 
-    # Default paths from config (same as training output: scripts/train.py → best_model.pt)
-    model_path = model_path or (project_root / cfg.model_dir / "best_model2.pt")
-    thresholds_path = thresholds_path or (project_root / cfg.thresholds_yaml)
+    # Choose a sensible default checkpoint:
+    # - Prefer the local-trained model (model_checkpoints/best_model.pt) if present
+    # - Otherwise fall back to the colab-trained model (model_checkpoints/colab/best_model.pt)
+    if model_path is None:
+        colab_default = project_root / cfg.model_dir / "colab" / "best_model.pt"
+        local_default = project_root / cfg.model_dir / "best_model.pt"
+        if local_default.exists():
+            model_path = local_default
+        else:
+            model_path = colab_default
+    else:
+        model_path = Path(model_path)
+        
+    # Heuristic: treat any checkpoint under a "colab" subdirectory as a Colab-trained model.
+    is_colab_model = "colab" in {p.lower() for p in model_path.parts}
 
-    if not Path(model_path).exists():
+    if thresholds_path is None:
+        if is_colab_model:
+            # Use thresholds next to the Colab checkpoint if present; fall back to config otherwise.
+            candidate = model_path.with_name("thresholds.yaml")
+            thresholds_path = candidate if candidate.exists() else (project_root / cfg.thresholds_yaml)
+        else:
+            thresholds_path = project_root / cfg.thresholds_yaml
+    else:
+        thresholds_path = Path(thresholds_path)
+
+    if not model_path.exists():
         # No trained model: return all uploads as unknown (no placeholder data)
         print(f"[BatLab] Model not found at {model_path}; all {len(uploaded_files)} file(s) marked unknown.")
         unknown = [{"Filename": f.name} for f in uploaded_files]
@@ -100,7 +153,12 @@ def classify_uploaded_files(
     with tempfile.TemporaryDirectory(prefix="batlab_upload_") as tmpdir:
         root_dir = str(Path(tmpdir).resolve())
         tmpdir_path = Path(tmpdir)
-        upload_cfg = _build_upload_cfg_dict(cfg, tmpdir_path)
+
+        # Match feature pipeline to the origin of the checkpoint.
+        if is_colab_model:
+            upload_cfg = _build_colab_upload_cfg_dict(tmpdir_path)
+        else:
+            upload_cfg = _build_upload_cfg_dict(cfg, tmpdir_path)
 
         # Build upload "dataset": one wav path per file, then run inference (same as MLModel2)
         for file in uploaded_files:
@@ -124,6 +182,8 @@ def classify_uploaded_files(
                     cfg=upload_cfg,
                     device=device,
                 )
+                # Debug: log raw prediction dict (includes label, prob, top2, etc.)
+                print(f"[BatLab] Raw prediction for {filename}: {out}")
             except Exception as e:
                 print(f"[BatLab] {filename}: ERROR - {e}")
                 unknown_results.append({"Filename": filename})

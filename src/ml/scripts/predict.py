@@ -4,9 +4,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ..config import Config, ensure_dirs
-from ..utils.device import get_device
-from ..training.inference import predict_file
+from src.ml.config import Config, ensure_dirs
+from src.ml.utils.device import get_device
+from src.ml.training.inference import predict_file
 
 
 def parse_args():
@@ -40,3 +40,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

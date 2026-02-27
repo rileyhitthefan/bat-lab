@@ -114,6 +114,7 @@ input, textarea, [data-baseweb="input"] {
     background-color: #1A1A1A !important;
 }
 
+/* Browse files button - black background with white text */
 [data-testid="stFileUploader"] button,
 [data-testid="stFileUploaderDropzone"] button {
     background-color: #000000 !important;
@@ -180,24 +181,29 @@ input[type="radio"]:hover,
     color: #FFFFFF !important;
 }
 
-/* Download buttons (Classify tab result dataframes) - match app button style */
+/* Download buttons (Classify tab result dataframes) - black background with white text */
 [data-testid="stDownloadButton"] button,
 .stDownloadButton button {
-    background-color: transparent !important;
+    background-color: #000000 !important;
     color: #FFFFFF !important;
-    border: 1px solid rgba(255, 255, 255, 0.3) !important;
-}
-
-[data-testid="stDownloadButton"] button:hover,
-.stDownloadButton button:hover {
-    background-color: transparent !important;
-    color: #B19CD9 !important;
-    border: 2px solid #B19CD9 !important;
+    border: 1px solid #000000 !important;
 }
 
 [data-testid="stDownloadButton"] button p,
 .stDownloadButton button p {
-    color: inherit !important;
+    color: #FFFFFF !important;
+}
+
+[data-testid="stDownloadButton"] button:hover,
+.stDownloadButton button:hover {
+    background-color: #222222 !important;
+    color: #FFFFFF !important;
+    border: 2px solid #B19CD9 !important;
+}
+
+[data-testid="stDownloadButton"] button:hover p,
+.stDownloadButton button:hover p {
+    color: #FFFFFF !important;
 }
 
 /* All buttons purple hover */

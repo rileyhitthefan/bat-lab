@@ -54,3 +54,16 @@ def cache_mel_call(path: str, root_dir_param: str, cfg: dict):
         mel = mel[:, :target_frames]
     np.save(out_path, mel)
     return out_path
+
+def cache_mel(path: str, root_dir_param: str, cfg: dict):
+    """Cache mel spectrogram (matches training notebook)."""
+    rel_path = path.replace(root_dir_param, "").replace("/", "_").replace("\\", "_")
+    key = rel_path.replace(".wav", f"_{cfg['sr']}sr_{cfg['n_mels']}mels.npy")
+    out_path = os.path.join(cfg["cache_dir"], key)
+    if os.path.exists(out_path):
+        return out_path
+    os.makedirs(cfg["cache_dir"], exist_ok=True)
+    y, sr = load_wav_fixed(path, cfg["sr"], cfg["mono"], cfg["duration_s"])
+    mel = wav_to_mel(y, sr, cfg["n_fft"], cfg["hop_length"], cfg["n_mels"], cfg["fmin"], cfg["fmax"])
+    np.save(out_path, mel)
+    return out_path

@@ -1,1 +1,2 @@
-"""CLI scripts for BatLab ML pipeline."""
+"""CLI scripts package for BatLab (training, single-file prediction, etc.)."""
+
