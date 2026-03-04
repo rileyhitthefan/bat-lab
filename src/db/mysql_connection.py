@@ -18,7 +18,7 @@ def get_connection_params() -> dict:
         "host": os.getenv("MYSQL_HOST", "localhost"),
         "port": int(os.getenv("MYSQL_PORT", "3306")),
         "user": os.getenv("MYSQL_USER", "root"),
-        "password": os.getenv("MYSQL_PASSWORD", ""),
+        "password": os.getenv("MYSQL_PASSWORD", "root@1234"),
         "database": os.getenv("MYSQL_DATABASE", "batlab_schema"),
     }
 

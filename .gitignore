@@ -3,3 +3,7 @@ node_modules/
 *.egg-info/
 __pycache__/
 *.pyc
+cache_mels/
+cache_numfeats/
+data/
+training_calls/

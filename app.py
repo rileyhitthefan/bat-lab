@@ -5,6 +5,16 @@ from pathlib import Path
 
 from src.ml.classify_app import classify_uploaded_files
 from src.ml.config import Config
+from src.db.connection import (
+    get_call_library_data,
+    save_detectors,
+    save_species,
+    save_training_data,
+    load_detectors_from_db,
+    load_species_from_db,
+    load_training_records_df,
+)
+from src.ml.scripts.train import train_from_manifest_df
 
 # ============================================================================
 # PAGE CONFIGURATION
@@ -93,36 +103,19 @@ if 'training_file_bytes' not in st.session_state:
     st.session_state.training_file_bytes = {}  # filename -> bytes (accumulated across submissions)
 
 if 'detectors' not in st.session_state:
-    st.session_state.detectors = [
-        {"Detector ID": "DET-KZN01", "Latitude": "-29.8587", "Longitude": "31.0218"},
-        {"Detector ID": "DET-WC02", "Latitude": "-33.9249", "Longitude": "18.4241"},
-        {"Detector ID": "DET-GP03", "Latitude": "-26.2041", "Longitude": "28.0473"},
-        {"Detector ID": "DET-LP04", "Latitude": "-23.8962", "Longitude": "29.4486"},
-        {"Detector ID": "DET-EC05", "Latitude": "-33.0153", "Longitude": "27.9116"},
-        {"Detector ID": "DET-MP06", "Latitude": "-25.4753", "Longitude": "30.9694"},
-        {"Detector ID": "DET-NC07", "Latitude": "-28.7282", "Longitude": "24.7499"},
-        {"Detector ID": "DET-NW08", "Latitude": "-25.8553", "Longitude": "25.6415"},
-        {"Detector ID": "DET-FS09", "Latitude": "-29.1217", "Longitude": "26.2141"},
-    ]
+    detectors, det_errors = load_detectors_from_db()
+    st.session_state.detectors = detectors
+    if det_errors:
+        for msg in det_errors:
+            st.warning(f"Database warning (detectors): {msg}")
 
 if 'species' not in st.session_state:
-    _project_root = Path(__file__).resolve().parent
-    _species = load_species_from_manifest(_project_root)
-    if _species:
-        st.session_state.species = _species
-    else:
-        # Fallback when no manifest exists yet (e.g. before any training)
-        st.session_state.species = [
-            {"Abbreviation": "TAPMAU", "Latin Name": "Taphozous mauritianus", "Common Name": "Mauritian Tomb Bat"},
-            {"Abbreviation": "TADAEG", "Latin Name": "Tadarida aegyptiaca", "Common Name": "Egyptian Free-tailed Bat"},
-            {"Abbreviation": "OTOMAR", "Latin Name": "Otomops martiensseni", "Common Name": "Large-eared Free-tailed Bat"},
-            {"Abbreviation": "SCODIN", "Latin Name": "Scotophilus dinganii", "Common Name": "African Yellow Bat"},
-            {"Abbreviation": "MINNAT", "Latin Name": "Miniopterus natalensis", "Common Name": "Natal Long-fingered Bat"},
-            {"Abbreviation": "NEOCAP", "Latin Name": "Neoromicia capensis", "Common Name": "Cape Serotine Bat"},
-            {"Abbreviation": "MYOTRI", "Latin Name": "Myotis tricolor", "Common Name": "Temminck's Myotis"},
-            {"Abbreviation": "NYCTHE", "Latin Name": "Nycteris thebaica", "Common Name": "Egyptian Slit-faced Bat"},
-            {"Abbreviation": "RHICAP", "Latin Name": "Rhinolophus capensis", "Common Name": "Cape Horseshoe Bat"},
-        ]
+    # Load species strictly from the database (no manifest placeholders)
+    species_from_db, sp_errors = load_species_from_db()
+    if sp_errors:
+        for msg in sp_errors:
+            st.warning(f"Database warning (species): {msg}")
+    st.session_state.species = species_from_db or []
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -334,7 +327,7 @@ with tab1:
     if not st.session_state.known_data.empty or not st.session_state.unknown_data.empty:
         col1, col2 = st.columns([3, 1])
         with col2:
-            if st.button("**Start New Session**", use_container_width=True):
+            if st.button("**Start New Session**", use_container_width=True, key="btn_start_new_session"):
                 st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
                 st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
                 st.session_state.uploaded_files = []
@@ -360,7 +353,7 @@ with tab1:
         placeholder=r"e.g.  /Users/you/BatRecordings  or  C:\BatRecordings",
         key="source_folder_input"
     )
-    if st.button("**Verify Path & Load Files**", use_container_width=True):
+    if st.button("**Verify Path & Load Files**", use_container_width=True, key="btn_verify_path"):
         source_input = (source_input or "").strip()
         if not source_input:
             st.error("Please enter a folder path.")
@@ -652,12 +645,26 @@ with tab2:
                 for e in errors:
                     st.error(e)
             else:
+                # Update in-memory list
                 st.session_state.detectors.append({
                     "Detector ID": name,
                     "Latitude": lat,
                     "Longitude": lon,
                 })
-                st.success("New detector saved successfully!")
+
+                # Persist to database using existing MySQL helper
+                db_detectors = [{
+                    "Detector": name,
+                    "Latitude": lat,
+                    "Longitude": lon,
+                }]
+                db_errors = save_detectors(db_detectors)
+                if db_errors:
+                    for msg in db_errors:
+                        st.error(f"Database error (detector): {msg}")
+                else:
+                    st.success("New detector saved to database successfully.")
+
                 st.rerun()
 
     st.markdown("---")
@@ -681,6 +688,12 @@ with tab3:
     st.markdown("---")
     st.header("Register a New Species")
     st.markdown("---")
+
+    # Load species from the database once for this tab
+    db_species_for_tab, db_species_errors = load_species_from_db()
+    if db_species_errors:
+        for msg in db_species_errors:
+            st.error(f"Database error (load species): {msg}")
 
     with st.form("add_species_form", clear_on_submit=False):
         abbr = st.text_input("Abbreviation *", placeholder="e.g., MYLU")
@@ -708,10 +721,12 @@ with tab3:
                 errors.append("Latin Name is required.")
 
             if not errors:
+                # Check duplicates against what is persisted in the database,
+                # not against any manifest-derived placeholders in session state.
                 duplicate = any(
-                    s["Abbreviation"].lower() == abbr.lower() and
-                    s["Latin Name"].lower() == latin.lower()
-                    for s in st.session_state.species
+                    s["Abbreviation"].lower() == abbr.lower()
+                    and s["Latin Name"].lower() == latin.lower()
+                    for s in db_species_for_tab
                 )
                 if duplicate:
                     errors.append(
@@ -722,26 +737,44 @@ with tab3:
                 for e in errors:
                     st.error(e)
             else:
+                # Update in-memory list
                 st.session_state.species.append({
                     "Abbreviation": abbr,
                     "Latin Name": latin,
                     "Common Name": common,
                 })
-                st.success("New species saved successfully!")
+
+                # Persist to database using existing MySQL helper
+                db_species = [{
+                    "Abbreviation": abbr,
+                    "LatinName": latin,
+                    "CommonName": common,
+                }]
+                db_errors = save_species(db_species)
+                if db_errors:
+                    for msg in db_errors:
+                        st.error(f"Database error (species): {msg}")
+                else:
+                    st.success("New species saved to database successfully.")
+
                 st.rerun()
 
     st.markdown("---")
 
-    # Show registered species
-    if st.session_state.species:
-        st.subheader("Registered Species")
-        species_df = pd.DataFrame(st.session_state.species)
-        st.dataframe(
-            species_df,
-            use_container_width=True,
-            hide_index=True,
-            height=400
-        )
+    # Show registered species (prefer database, not manifest placeholders)
+    st.subheader("Registered Species")
+    if db_species_for_tab:
+        species_df = pd.DataFrame(db_species_for_tab)
+    else:
+        # Show an empty table with expected columns so new species appear
+        species_df = pd.DataFrame(columns=["Abbreviation", "Latin Name", "Common Name"])
+
+    st.dataframe(
+        species_df,
+        use_container_width=True,
+        hide_index=True,
+        height=400
+    )
 
 # ============================================================================
 # TAB 4: ADD TRAINING DATA
@@ -815,7 +848,7 @@ with tab4:
 
     st.markdown("---")
 
-    submitted_training = st.button("Save Training Data", use_container_width=True, type="primary")
+    submitted_training = st.button("Save Training Data", use_container_width=True, type="primary", key="btn_save_training_data")
 
     if submitted_training:
         errors = []
@@ -839,35 +872,68 @@ with tab4:
                 st.session_state.training_file_bytes[f.name] = file_bytes
                 new_file_names.append(f.name)
 
-            st.session_state.training_entries.append({
+            entry = {
                 "Species": selected_species,
                 "Detector": selected_detector,
                 "FileCount": len(training_files),
-                "FileNames": new_file_names
-            })
+                "FileNames": new_file_names,
+            }
+            st.session_state.training_entries.append(entry)
+
+            # Persist to Call_Library (save_training_data)
+            db_entries = [
+                {
+                    "Species": entry["Species"],
+                    "Location": entry["Detector"],
+                    "FileCount": entry["FileCount"],
+                    "FileNames": entry["FileNames"],
+                }
+            ]
+            bytes_map = {
+                name: st.session_state.training_file_bytes.get(name)
+                for name in new_file_names
+            }
+            db_errors = save_training_data(db_entries, bytes_map)
+
+            for msg in db_errors:
+                st.error(f"Database error (training data): {msg}")
+
+            if not db_errors:
+                st.success(
+                    f"Training data saved to database: {len(training_files)} file(s) for {selected_species} at detector '{selected_detector}'."
+                )
+
             st.session_state.training_uploader_key += 1
-            st.success(
-                f"Training data saved: {len(training_files)} file(s) for {selected_species} at detector '{selected_detector}'.")
             st.rerun()
 
     st.markdown("---")
 
-    # Show training data entries
-    if st.session_state.training_entries:
-        st.subheader("Training Data Entries")
-        training_df = pd.DataFrame([{
-            "Species": entry["Species"],
-            "Detector": entry.get("Detector", entry.get("Location", "")),
-            "Files": entry["FileCount"]
-        } for entry in st.session_state.training_entries])
+    # Show training data entries from database (aggregated)
+    records_df, records_errors = load_training_records_df()
+    if records_errors:
+        for msg in records_errors:
+            st.error(f"Database error (training records): {msg}")
+    if not records_df.empty:
+        st.subheader("Training Data Entries (from database)")
+        summary_df = (
+            records_df.groupby(["species_abbreviation", "location_name"], as_index=False)["file_count"]
+            .sum()
+            .rename(
+                columns={
+                    "species_abbreviation": "Species",
+                    "location_name": "Detector",
+                    "file_count": "Files",
+                }
+            )
+        )
         st.dataframe(
-            training_df,
+            summary_df,
             use_container_width=True,
             hide_index=True,
-            height=400
+            height=400,
         )
     else:
-        st.info("No training data entries yet. Add your first training dataset above!")
+        st.info("No training data entries found in the database yet.")
 
 # ============================================================================
 # TAB 5: TRAIN NEW MODEL
@@ -876,20 +942,39 @@ with tab5:
     st.markdown("---")
     st.header("Train New Model")
     st.markdown("---")
+    
+    # Precompute list of detector IDs (may be empty)
+    all_detector_ids = [d["Detector ID"] for d in st.session_state.detectors]
 
     if not st.session_state.detectors:
         st.info("No detectors registered yet. Please add detectors in the 'Add Detector' tab first.")
     elif not st.session_state.species:
         st.info("No species registered yet. Please add species in the 'Add Species' tab first.")
     else:
-        st.markdown("Select the detectors and species you want to include in the new model training run.")
+        st.markdown("Select one or more detectors and the species you want to include in the new model training run.")
         st.markdown("---")
 
-        if "train_selections" not in st.session_state:
-            st.session_state.train_selections = {}
+        # Load training metadata once to determine which species have training per detector.
+        records_df, records_errors = load_training_records_df()
+        if records_errors:
+            for msg in records_errors:
+                st.error(f"Database error (training records): {msg}")
 
-        all_species_options = [s["Abbreviation"] for s in st.session_state.species]
-        all_detector_ids = [d["Detector ID"] for d in st.session_state.detectors]
+        # Build a map of detector -> sorted list of species that have training data
+        if records_df is not None and not records_df.empty:
+            det_species_map: dict[str, list[str]] = (
+                records_df.groupby("location_name")["species_abbreviation"]
+                .apply(lambda s: sorted(set(s.dropna().astype(str))))
+                .to_dict()
+            )
+        else:
+            det_species_map = {}
+
+        # Session state for multi-detector and multi-species selection
+        if "train_selected_detectors" not in st.session_state:
+            st.session_state.train_selected_detectors = []
+        if "train_selected_species" not in st.session_state:
+            st.session_state.train_selected_species = []
 
         # Detector search
         detector_search = st.text_input(
@@ -906,68 +991,97 @@ with tab5:
 
         if not filtered_detectors:
             st.info("No detectors match your search.")
-
-        for det_id in filtered_detectors:
-            # Initialise selection for this detector if not present
-            if det_id not in st.session_state.train_selections:
-                st.session_state.train_selections[det_id] = {
-                    "selected": False,
-                    "species": [],
-                    "species_search": ""
-                }
-
-            col_check, col_label = st.columns([0.05, 0.95])
-            with col_check:
-                selected = st.checkbox(
-                    "",
-                    value=st.session_state.train_selections[det_id]["selected"],
-                    key=f"det_check_{det_id}"
-                )
-            with col_label:
-                st.markdown(f"**{det_id}**")
-
-            st.session_state.train_selections[det_id]["selected"] = selected
-
-            if selected:
-                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;*Select species:*")
-                chosen_species = []
-                for sp in all_species_options:
-                    already = sp in st.session_state.train_selections[det_id]["species"]
-                    checked = st.checkbox(
-                        sp,
-                        value=already,
-                        key=f"sp_check_{det_id}_{sp}"
-                    )
-                    if checked:
-                        chosen_species.append(sp)
-                st.session_state.train_selections[det_id]["species"] = chosen_species
-
-            st.markdown("---")
-
-        # Summary and train button
-        active = {
-            det: info for det, info in st.session_state.train_selections.items()
-            if info["selected"]
-        }
-
-        if active:
-            st.markdown("**Selected for training:**")
-            all_valid = True
-            for det_id, info in active.items():
-                if info["species"]:
-                    st.markdown(f"- **{det_id}**: {', '.join(info['species'])}")
-                else:
-                    st.markdown(f"- **{det_id}**: No species selected")
-                    all_valid = False
-
-            st.markdown("")
-            if st.button("Train Model", use_container_width=True, type="primary"):
-                if not all_valid:
-                    st.error("Please select at least one species for each chosen detector before training.")
-                else:
-                    st.success(
-                        f"Training job submitted for {len(active)} detector(s): "
-                        + ", ".join(active.keys())
-                    )
+            selected_detectors: list[str] = []
         else:
-            st.info("Select at least one detector above to configure your training run.")
+            # Display all (filtered) detectors from the database as checkboxes
+            st.markdown("**Detectors found in database:**")
+            selected_detectors = []
+            for det_id in filtered_detectors:
+                col_check, col_label = st.columns([0.05, 0.95])
+                with col_check:
+                    checked = st.checkbox(
+                        "",
+                        value=det_id in st.session_state.train_selected_detectors,
+                        key=f"train_det_{det_id}",
+                    )
+                with col_label:
+                    st.markdown(f"**{det_id}**")
+
+                if checked:
+                    selected_detectors.append(det_id)
+
+            st.session_state.train_selected_detectors = selected_detectors
+
+        st.markdown("---")
+
+        # Species selection based on all selected detectors
+        union_species: list[str] = []
+        for det_id in selected_detectors:
+            union_species.extend(det_species_map.get(det_id, []))
+        union_species = sorted(set(union_species))
+
+        if not selected_detectors:
+            st.info("Select at least one detector above to see available species.")
+        elif not union_species:
+            st.warning("No training data in the database for the selected detectors yet.")
+        else:
+            st.markdown("**Species with training data for selected detector(s):**")
+            selected_species: list[str] = []
+            for sp in union_species:
+                checked = st.checkbox(
+                    sp,
+                    value=sp in st.session_state.train_selected_species,
+                    key=f"train_sp_{sp}",
+                )
+                if checked:
+                    selected_species.append(sp)
+            st.session_state.train_selected_species = selected_species
+
+        st.markdown("---")
+
+        # Universal Train Model button at the bottom; greyed out until at least
+        # one detector and one species are selected
+        can_train = bool(
+            st.session_state.train_selected_detectors
+            and st.session_state.train_selected_species
+        )
+        clicked = st.button(
+            "Train Model",
+            use_container_width=True,
+            type="primary",
+            key="btn_train_model_global",
+            disabled=not can_train,
+        )
+
+        if clicked and can_train:
+            with st.spinner("Training model. This may take several minutes..."):
+                # Load all available training calls from the database
+                call_df = get_call_library_data()
+                if call_df is None or call_df.empty:
+                    st.error("No training calls found in the database.")
+                else:
+                    # Map DB columns to manifest schema expected by the training pipeline
+                    df = call_df.rename(
+                        columns={
+                            "file": "filepath",
+                            "bat": "label",
+                            "location": "location",
+                        }
+                    )
+
+                    # Filter rows to match the selected detectors and chosen species
+                    mask = df["location"].isin(st.session_state.train_selected_detectors) & (
+                        df["label"].isin(st.session_state.train_selected_species)
+                    )
+                    filtered = df[mask].copy()
+
+                    if filtered.empty:
+                        st.error(
+                            "No matching training files found in the database for the selected detectors and species."
+                        )
+                    else:
+                        result = train_from_manifest_df(filtered)
+                        st.success(
+                            f"Training complete. Test accuracy: {result['test_acc']:.4f}. "
+                            f"Model saved to {result['best_path']}."
+                        )

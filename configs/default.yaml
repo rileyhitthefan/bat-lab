@@ -17,6 +17,6 @@ cache_dir: cache_mels
 numfeat_cache_dir: cache_numfeats
 manifest_csv: model_checkpoints/data_manifest.csv
 thresholds_yaml: model_checkpoints/thresholds.yaml
-default_min_conf: 0.6
+default_min_conf: 0.7
 
 seed: 1337

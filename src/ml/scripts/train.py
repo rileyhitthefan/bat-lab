@@ -196,50 +196,58 @@ def evaluate_model(model, loader, device: str) -> float:
     return total_acc / total_n if total_n > 0 else 0.0
 
 
-def main():
-    args = parse_args()
+def train_from_manifest_df(
+    df: pd.DataFrame,
+    data_root: str = "",
+    config: str = "configs/default.yaml",
+    min_samples: int = 3,
+    test_size: float = 0.3,
+    val_size: float = 0.5,
+    seed: int | None = None,
+) -> dict:
+    """
+    Run the full training pipeline given an in-memory manifest DataFrame.
+
+    Args:
+        df: DataFrame with columns ["filepath", "label", "location"].
+        data_root: Root directory for audio files (used only for cache key construction).
+        config: Relative path to the config YAML from project root.
+        min_samples: Minimum samples per class to keep.
+        test_size: Test+val split size.
+        val_size: Fraction of test+val set used for validation.
+        seed: Optional random seed (falls back to config.seed if None).
+
+    Returns:
+        Dictionary with keys: best_path, test_acc, temperature, history.
+    """
     project_root = Path(__file__).resolve().parents[3]
 
-    # Load config
-    config_path = project_root / args.config
+    # Load config and ensure directories
+    config_path = project_root / config
     cfg = Config.from_yaml(config_path)
     ensure_dirs(cfg, project_root)
 
     # Set random seed
-    seed = args.seed if args.seed is not None else cfg.seed
-    torch.manual_seed(seed)
-    np.random.seed(seed)
+    seed_val = seed if seed is not None else cfg.seed
+    torch.manual_seed(seed_val)
+    np.random.seed(seed_val)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+        torch.cuda.manual_seed_all(seed_val)
 
-    # Build or load manifest
-    if args.manifest:
-        manifest_path = args.manifest
-        if not Path(manifest_path).exists():
-            raise FileNotFoundError(f"Manifest not found: {manifest_path}")
-        print(f"Loading manifest from {manifest_path}...")
-        df = load_manifest(manifest_path)
-    else:
-        manifest_path = project_root / cfg.manifest_csv
-        print(f"Building manifest from {args.data_root}...")
-        df = build_manifest_from_dir(args.data_root, str(manifest_path))
-        print(f"Manifest saved to {manifest_path}")
+    # Persist manifest so other parts of the app (e.g. species list) can reuse it
+    manifest_path = project_root / cfg.manifest_csv
+    df.to_csv(manifest_path, index=False)
 
-    print(f"\n=== MANIFEST SUMMARY ===")
-    print(f"Total samples: {len(df)}")
-    print(f"Species: {df['label'].nunique()} ({sorted(df['label'].unique())})")
-    print(f"Locations: {df['location'].nunique()} ({sorted(df['location'].unique())})")
-
-    # Build loaders
+    # Build data loaders
     loaders, meta = build_loaders(
         df,
-        args.data_root,
+        data_root,
         cfg,
         project_root,
-        min_samples=args.min_samples,
-        test_size=args.test_size,
-        val_size=args.val_size,
-        seed=seed,
+        min_samples=min_samples,
+        test_size=test_size,
+        val_size=val_size,
+        seed=seed_val,
     )
 
     # Create model
@@ -278,7 +286,6 @@ def main():
     print(f"Training history: {len(result.history)} epochs")
 
     # Visualize training history and save plot next to the model checkpoint.
-    # This uses matplotlib only if available; otherwise it fails gracefully.
     try:
         import matplotlib.pyplot as plt
 
@@ -341,6 +348,52 @@ def main():
         result.best_path,
     )
     print(f"Saved calibrated model with temperature={temperature:.4f} to {result.best_path}")
+
+    return {
+        "best_path": str(result.best_path),
+        "test_acc": float(test_acc),
+        "temperature": float(temperature),
+        "history": result.history,
+    }
+
+
+def main():
+    args = parse_args()
+    project_root = Path(__file__).resolve().parents[3]
+
+    # Load config
+    config_path = project_root / args.config
+    cfg = Config.from_yaml(config_path)
+    ensure_dirs(cfg, project_root)
+
+    # Build or load manifest
+    if args.manifest:
+        manifest_path = args.manifest
+        if not Path(manifest_path).exists():
+            raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+        print(f"Loading manifest from {manifest_path}...")
+        df = load_manifest(manifest_path)
+    else:
+        manifest_path = project_root / cfg.manifest_csv
+        print(f"Building manifest from {args.data_root}...")
+        df = build_manifest_from_dir(args.data_root, str(manifest_path))
+        print(f"Manifest saved to {manifest_path}")
+
+    print(f"\n=== MANIFEST SUMMARY ===")
+    print(f"Total samples: {len(df)}")
+    print(f"Species: {df['label'].nunique()} ({sorted(df['label'].unique())})")
+    print(f"Locations: {df['location'].nunique()} ({sorted(df['location'].unique())})")
+
+    # Delegate to shared training routine
+    train_from_manifest_df(
+        df=df,
+        data_root=args.data_root,
+        config=args.config,
+        min_samples=args.min_samples,
+        test_size=args.test_size,
+        val_size=args.val_size,
+        seed=args.seed,
+    )
 
 
 if __name__ == "__main__":
