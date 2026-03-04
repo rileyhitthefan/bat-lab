@@ -56,6 +56,8 @@ MySQL is optional; the app and training work without it. If you use the DB, ensu
 
 ## Run
 
+Application shortcut (no code) : `test.bat`
+
 - **UI:**  
   `streamlit run app.py`
 

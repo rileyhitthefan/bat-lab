@@ -2,13 +2,29 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 REM ---------------------------
-REM Test no db
+REM BatLab app starter (no DB)
+REM - Double-click or use shortcut to start app
 REM - Reuses batlabenv if present
 REM - Installs requirements ONLY if key imports missing
 REM ---------------------------
 
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
+
+REM ---- Create/refresh Desktop shortcut that points to this script ----
+set "SHORTCUT_NAME=BatLab App"
+set "DESKTOP=%USERPROFILE%\Desktop"
+if exist "%DESKTOP%\%SHORTCUT_NAME%.lnk" goto :after_shortcut
+
+echo [INFO] Creating Desktop shortcut "%SHORTCUT_NAME%.lnk"...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('$env:USERPROFILE\Desktop\BatLab App.lnk');" ^
+  "$s.TargetPath = '%~f0';" ^
+  "$s.WorkingDirectory = '%ROOT%';" ^
+  "$s.IconLocation = '%SystemRoot%\System32\SHELL32.dll, 2';" ^
+  "$s.Save()"
+
+:after_shortcut
 
 set "VENV_DIR=batlabenv"
 set "BATLAB_NO_DB=1"
@@ -22,7 +38,7 @@ if /I "%~1"=="--force" set "FORCE=1"
 
 echo.
 echo =============================
-echo Test no db
+echo Bat-Lab App
 echo Root: %ROOT%
 echo URL : %URL%
 echo FORCE REINSTALL: %FORCE%
