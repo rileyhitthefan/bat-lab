@@ -1,8 +1,24 @@
+# Notebooks
 test.ipynb
-node_modules/
-*.egg-info/
+*.ipynb_checkpoints/
+
+# Python
 __pycache__/
 *.pyc
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Env
+.venv/
+venv/
+env/
+
+# Node (if any)
+node_modules/
+
+# Generated / local data
 cache_mels/
 cache_numfeats/
 data/
