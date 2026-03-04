@@ -25,7 +25,7 @@ CREATE TABLE `Locations` (
 -- Bats table
 CREATE TABLE IF NOT EXISTS `Bats` (
   `abbreviation` VARCHAR(45) NOT NULL,
-  `latin_name` VARCHAR(45) NULL,
+  `latin_name` VARCHAR(45) NOT NULL,
   `common_name` VARCHAR(45) NULL,
   PRIMARY KEY (`abbreviation`),
   UNIQUE INDEX `latin_name_UNIQUE` (`latin_name` ASC),
