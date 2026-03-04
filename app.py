@@ -1154,6 +1154,8 @@ with tab1:
     st.markdown("### Step 1 — Enter the source folder path")
 
     import os
+    from pathlib import Path
+
     source_input = st.text_input(
         "Source folder path *",
         value=st.session_state.source_folder,
@@ -1162,28 +1164,44 @@ with tab1:
     )
 
     if st.button("**Verify Path & Load Files**", use_container_width=True):
-        source_input = (source_input or "").strip()
+        raw_input = (source_input or "").strip()
 
-        if not source_input:
+        if not raw_input:
             st.error("Please enter a folder path.")
-        elif not os.path.isdir(source_input):
-            st.error(f"Path not found or is not a folder: '{source_input}'")
         else:
-            # Scan the folder for .wav files (case-insensitive extension check)
-            wav_files = [f for f in os.listdir(source_input) if f.lower().endswith('.wav')]
+            # Normalise the path for the current OS:
+            #   • Expands ~ to the user's home directory on all platforms
+            #   • Converts forward/back slashes to the OS separator
+            #     (so Windows users can paste Mac-style paths and vice versa)
+            #   • Resolves any . / .. components
+            try:
+                source_path = Path(raw_input).expanduser().resolve()
+            except Exception as exc:
+                st.error(f"Invalid path: {exc}")
+                source_path = None
 
-            if not wav_files:
-                st.warning(f"No .wav files found in '{source_input}'.")
-            else:
-                # Store verified path and file list; reset any previous results
-                st.session_state.source_folder  = source_input
-                st.session_state.uploaded_files = wav_files
-                st.session_state.known_data     = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
-                st.session_state.unknown_data   = pd.DataFrame(columns=['Filename'])
-                st.session_state.id_folder_result  = None
-                st.session_state.unk_folder_result = None
-                st.success(f"✅ Found {len(wav_files)} .wav file(s) in '{source_input}'.")
-                st.rerun()
+            if source_path is not None:
+                if not source_path.is_dir():
+                    st.error(f"Path not found or is not a folder: '{source_path}'")
+                else:
+                    # Scan the folder for .wav files (case-insensitive extension check)
+                    wav_files = [f.name for f in source_path.iterdir()
+                                 if f.is_file() and f.suffix.lower() == '.wav']
+
+                    if not wav_files:
+                        st.warning(f"No .wav files found in '{source_path}'.")
+                    else:
+                        # Store the normalised string path so the rest of the app
+                        # (organise_files, move logic, etc.) continues to work as-is
+                        normalised = str(source_path)
+                        st.session_state.source_folder  = normalised
+                        st.session_state.uploaded_files = wav_files
+                        st.session_state.known_data     = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
+                        st.session_state.unknown_data   = pd.DataFrame(columns=['Filename'])
+                        st.session_state.id_folder_result  = None
+                        st.session_state.unk_folder_result = None
+                        st.success(f"✅ Found {len(wav_files)} .wav file(s) in '{normalised}'.")
+                        st.rerun()
 
     # Show a summary of the verified source folder if one has been set
     if st.session_state.source_folder and st.session_state.uploaded_files:
@@ -1274,7 +1292,15 @@ with tab1:
 
                 if confirm_id:
                     import os, shutil
-                    id_folder_path = (id_folder_path or "").strip()
+                    from pathlib import Path as _Path
+                    raw_id = (id_folder_path or "").strip()
+                    if raw_id:
+                        try:
+                            id_folder_path = str(_Path(raw_id).expanduser().resolve())
+                        except Exception:
+                            id_folder_path = raw_id
+                    else:
+                        id_folder_path = ""
 
                     if not id_folder_path:
                         st.error("Please enter a destination folder path.")
@@ -1284,24 +1310,41 @@ with tab1:
                     else:
                         known_names = st.session_state.known_data['Filename'].tolist()
 
-                        # Create the destination folder
+                        # Create the top-level destination folder
                         try:
                             os.makedirs(id_folder_path, exist_ok=True)
                         except Exception as exc:
                             st.error(f"Could not create folder: {exc}")
                             st.stop()
 
-                        # Move each identified file one by one
+                        # Move each file into a species subfolder derived from
+                        # the second underscore-separated segment of the filename.
+                        # e.g. "00001_PIPHES_TCUBAT_...wav" → id_folder_path/PIPHES/
+                        # Files whose names don't follow the pattern go into an
+                        # "Unknown_Species" fallback subfolder.
                         moved, failed = [], []
                         for fname in known_names:
                             src = os.path.join(st.session_state.source_folder, fname)
-                            dst = os.path.join(id_folder_path, fname)
                             if not os.path.isfile(src):
                                 failed.append(f"{fname} (not found in source)")
                                 continue
+
+                            # Parse species code from filename
+                            parts = fname.split("_")
+                            species_code = parts[1] if len(parts) >= 2 else "Unknown_Species"
+
+                            # Create the species subfolder if it doesn't exist
+                            species_folder = os.path.join(id_folder_path, species_code)
+                            try:
+                                os.makedirs(species_folder, exist_ok=True)
+                            except Exception as exc:
+                                failed.append(f"{fname} (could not create subfolder: {exc})")
+                                continue
+
+                            dst = os.path.join(species_folder, fname)
                             try:
                                 shutil.move(src, dst)
-                                moved.append(fname)
+                                moved.append(f"{fname} → {species_code}/")
                             except Exception as exc:
                                 failed.append(f"{fname} ({exc})")
 
@@ -1318,7 +1361,7 @@ with tab1:
         if st.session_state.id_folder_result:
             res = st.session_state.id_folder_result
             if res["moved"]:
-                st.success(f"Moved **{len(res['moved'])}** file(s) to `{res['path']}`.")
+                st.success(f"Moved **{len(res['moved'])}** file(s) into species subfolders under `{res['path']}`.")
             if res["failed"]:
                 st.warning(
                     "The following files could not be moved:\n"
@@ -1373,7 +1416,15 @@ with tab1:
 
                 if confirm_unk:
                     import os, shutil
-                    unk_folder_path = (unk_folder_path or "").strip()
+                    from pathlib import Path as _Path
+                    raw_unk = (unk_folder_path or "").strip()
+                    if raw_unk:
+                        try:
+                            unk_folder_path = str(_Path(raw_unk).expanduser().resolve())
+                        except Exception:
+                            unk_folder_path = raw_unk
+                    else:
+                        unk_folder_path = ""
 
                     if not unk_folder_path:
                         st.error("Please enter a destination folder path.")
