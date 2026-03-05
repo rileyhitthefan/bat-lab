@@ -1,5 +1,5 @@
 """
-app2.py — BatLab: Bat Acoustic Identification Application
+app.py — BatLab: Bat Acoustic Identification Application
 ==========================================================
 A Streamlit-based web application that allows researchers to:
   1. Classify bat acoustic .wav files using a (simulated) ML model.
@@ -1317,11 +1317,19 @@ with tab1:
                             st.error(f"Could not create folder: {exc}")
                             st.stop()
 
-                        # Move each file into a species subfolder derived from
-                        # the second underscore-separated segment of the filename.
-                        # e.g. "00001_PIPHES_TCUBAT_...wav" → id_folder_path/PIPHES/
-                        # Files whose names don't follow the pattern go into an
-                        # "Unknown_Species" fallback subfolder.
+                        # Move each file into a species subfolder named after the
+                        # model's predicted species for that file.
+                        # e.g. prediction "Myotis lucifugus" → id_folder_path/Myotis lucifugus/
+                        # Falls back to "Unknown_Species" if no prediction is found.
+
+                        # Build a filename → predicted species lookup from known_data
+                        prediction_lookup = dict(
+                            zip(
+                                st.session_state.known_data['Filename'],
+                                st.session_state.known_data['Species Prediction'],
+                            )
+                        )
+
                         moved, failed = [], []
                         for fname in known_names:
                             src = os.path.join(st.session_state.source_folder, fname)
@@ -1329,12 +1337,17 @@ with tab1:
                                 failed.append(f"{fname} (not found in source)")
                                 continue
 
-                            # Parse species code from filename
-                            parts = fname.split("_")
-                            species_code = parts[1] if len(parts) >= 2 else "Unknown_Species"
+                            # Use the model's predicted species as the subfolder name
+                            species_code = prediction_lookup.get(fname, "Unknown_Species")
+
+                            # Sanitise the species name for use as a folder name
+                            # (replace characters that are invalid on Windows/Mac/Linux)
+                            safe_species = species_code.replace("/", "-").replace("\\", "-").strip()
+                            if not safe_species:
+                                safe_species = "Unknown_Species"
 
                             # Create the species subfolder if it doesn't exist
-                            species_folder = os.path.join(id_folder_path, species_code)
+                            species_folder = os.path.join(id_folder_path, safe_species)
                             try:
                                 os.makedirs(species_folder, exist_ok=True)
                             except Exception as exc:
@@ -1344,7 +1357,7 @@ with tab1:
                             dst = os.path.join(species_folder, fname)
                             try:
                                 shutil.move(src, dst)
-                                moved.append(f"{fname} → {species_code}/")
+                                moved.append(f"{fname} → {safe_species}/")
                             except Exception as exc:
                                 failed.append(f"{fname} ({exc})")
 
