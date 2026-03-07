@@ -56,7 +56,7 @@ MySQL is required. Ensure the schema is applied (`src/batlab.sql`) and connectio
 
 ## Run
 
-Application shortcut (no code) : `test.bat`
+Application shortcut (no code) : `batlabexe.bat`
 
 - **UI:**  
   `streamlit run app.py`
