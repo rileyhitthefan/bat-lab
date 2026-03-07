@@ -1,6 +1,7 @@
 # Bat Lab 
 
 Code for detecting and classifying bat echolocation calls and identifying behavioral sequences
+- Demo: https://drive.google.com/file/d/1GSTknpda1oaCgl3L0ylzwszFyxQ6K8qM/view?usp=sharing
 
 ```
 bat-lab/
@@ -37,5 +38,3 @@ bat-lab/
 ├── README.md
 └── .gitignore
 ```
-
-https://colab.research.google.com/drive/10E7C46wI7LC_fU7LjXwGmOvYGLCOuaM4?usp=sharing
