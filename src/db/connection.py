@@ -10,31 +10,55 @@ by ``app.py`` to read/write the MySQL schema defined in ``src/batlab.sql``:
 
 from __future__ import annotations
 
+import os
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Generator, Iterable, List, Tuple
 
 import pandas as pd
 import mysql.connector
 from mysql.connector import Error
-
-from .mysql_connection import get_connection_params
 
 
 # ---------------------------------------------------------------------------
 # LOW-LEVEL CONNECTION
 # ---------------------------------------------------------------------------
 
-config = get_connection_params()
+def get_connection_params() -> dict:
+    """Read MySQL connection params from environment or defaults."""
+    return {
+        "host": os.getenv("MYSQL_HOST", "localhost"),
+        "port": int(os.getenv("MYSQL_PORT", "3306")),
+        "user": os.getenv("MYSQL_USER", "root"),
+        "password": os.getenv("MYSQL_PASSWORD", "root@1234"),
+        "database": os.getenv("MYSQL_DATABASE", "batlab_schema"),
+    }
 
 
 def _connect():
-    """Create a new MySQL connection using shared config."""
-    return mysql.connector.connect(**config)
+    """Create a new MySQL connection using current env config."""
+    return mysql.connector.connect(**get_connection_params())
 
 
 def _close(conn) -> None:
     if conn is not None and hasattr(conn, "is_connected") and conn.is_connected():
         conn.close()
+
+
+@contextmanager
+def get_connection() -> Generator[mysql.connector.MySQLConnection, None, None]:
+    """Context manager for MySQL connections."""
+    conn = None
+    try:
+        conn = _connect()
+        yield conn
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        _close(conn)
 
 
 # ---------------------------------------------------------------------------

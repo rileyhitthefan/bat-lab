@@ -18,7 +18,7 @@ bat-lab/
 │   ├── batlab.sql                 # MySQL schema
 │   ├── db/                        # DB connection and helpers
 │   │   ├── connection.py          # High-level read/write (species, detectors, training data)
-│   │   └── mysql_connection.py   # Low-level connection
+│   │   └── __init__.py
 │   ├── ml/                        # ML package
 │   │   ├── config.py              # Config + paths
 │   │   ├── classify_app.py        # Classification for Streamlit
@@ -50,7 +50,7 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-MySQL is optional; the app and training work without it. If you use the DB, ensure the schema is applied (`src/batlab.sql`) and connection params are configured.
+MySQL is required. Ensure the schema is applied (`src/batlab.sql`) and connection params are configured via environment variables (`MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`).
 
 `data/`, `cache_mels/`, and `cache_numfeats/` are gitignored; put your bat-call `.wav` data under a directory of your choice and pass it as `--data-root`.
 

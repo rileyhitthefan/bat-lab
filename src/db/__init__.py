@@ -1,11 +1,12 @@
 """Database utilities for BatLab.
 
 This package centralises MySQL helpers. Low-level connection handling lives in
-`mysql_connection`, and higher-level read/write helpers live in `connection`.
+`connection`.
 """
 
-from src.db.mysql_connection import get_connection, get_connection_params
 from src.db.connection import (
+    get_connection,
+    get_connection_params,
     get_call_library_data,
     load_training_records_df,
     load_detectors_from_db,
