@@ -3,6 +3,7 @@
 Code for detecting and classifying bat echolocation calls and identifying behavioral sequences
 - Demo: https://drive.google.com/file/d/1GSTknpda1oaCgl3L0ylzwszFyxQ6K8qM/view?usp=sharing
 
+File for User Manual: https://drive.google.com/drive/folders/10A_5EJbl0U-VE_eGgLaygLFI4HIdAO14?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto 
 ```
 bat-lab/
 ├── app.py                          # UI entry point
