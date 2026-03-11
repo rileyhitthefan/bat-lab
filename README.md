@@ -15,6 +15,7 @@ Detect and classify bat echolocation calls and identify behavioral sequences.
 
 ## Layout
 
+File for User Manual: https://drive.google.com/drive/folders/10A_5EJbl0U-VE_eGgLaygLFI4HIdAO14?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto 
 ```
 bat-lab/
 ├── app.py                              # Streamlit UI

@@ -185,6 +185,14 @@ def save_species(species: Iterable[Dict[str, Any]]) -> List[str]:
 
     return errors
 
+config = {
+    'host': 'localhost',
+    'port': 3306,
+    'user': 'root',
+    'password': 'test', # Placeholder password for testing. In order to establish a connection, replace with new password
+    'database': 'batlab_schema', # Placeholder database name for testing. In order to establish a connection, replace with new database name
+    'auth_plugin': 'mysql_native_password'
+}
 
 def load_species_from_db() -> Tuple[List[Dict[str, Any]], List[str]]:
     """Load species from Bats table.
@@ -496,4 +504,3 @@ def get_call_library_data(location: str | None = None) -> pd.DataFrame:
         return pd.DataFrame(columns=["file", "bat", "location"])
     finally:
         _close(conn)
-

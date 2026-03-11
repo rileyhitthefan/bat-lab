@@ -1,3 +1,19 @@
+"""
+app.py — BatLab: Bat Acoustic Identification Application
+==========================================================
+A Streamlit-based web application that allows researchers to:
+  1. Classify bat acoustic .wav files using a (simulated) ML model.
+  2. Register and manage acoustic detectors (hardware units in the field).
+  3. Register and manage bat species records.
+  4. Upload training audio data linked to a species + detector.
+  5. Kick off new model training runs over selected detectors/species.
+
+The app requires a simple username/password login before the main UI is shown.
+All state (detectors, species, training data, classification results) is held
+in Streamlit's session_state, so it persists across widget interactions within
+a single browser session but is reset when the page is refreshed.
+"""
+
 import streamlit as st
 import pandas as pd
 import time
@@ -807,6 +823,7 @@ with tab3:
             latin = (latin or "").strip()
             common = (common or "").strip()
 
+            # ── Validation ───────────────────────────────────────────────────
             if not abbr:
                 errors.append("Abbreviation is required.")
             else:
