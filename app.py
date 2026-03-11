@@ -17,608 +17,176 @@ a single browser session but is reset when the page is refreshed.
 import streamlit as st
 import pandas as pd
 import time
+from pathlib import Path
 
+from src.ml.classify_app import classify_uploaded_files
+from src.ml.config import Config
+from src.db.connection import (
+    get_call_library_data,
+    save_detectors,
+    save_species,
+    save_training_data,
+    load_detectors_from_db,
+    load_species_from_db,
+    load_training_records_df,
+)
+from src.ml.training.subset_model_trainer import create_subset_model_from_ui_selection
+
+# ============================================================================
+# MODEL DISCOVERY (for Classify tab dropdown)
+# ============================================================================
+
+def get_available_models() -> list[tuple[str, str]]:
+    """
+    Return list of (display_label, model_path_str) for the Classify tab:
+    - Colab (base) model at model_checkpoints/colab/best_model.pt
+    - All subset models under model_checkpoints/local/<name>/<name>.pt
+    """
+    project_root = Path(__file__).resolve().parent
+    cfg = Config.from_yaml(project_root / "configs" / "default.yaml")
+    base = project_root / cfg.model_dir
+    options: list[tuple[str, str]] = []
+
+    colab_pt = base / "colab" / "best_model.pt"
+    if colab_pt.exists():
+        options.append(("Colab (base model)", str(colab_pt)))
+
+    local_dir = base / "local"
+    if local_dir.is_dir():
+        for subdir in sorted(local_dir.iterdir()):
+            if subdir.is_dir():
+                subset_pt = subdir / f"{subdir.name}.pt"
+                if subset_pt.exists():
+                    options.append((f"Subset: {subdir.name}", str(subset_pt)))
+
+    return options
 
 # ============================================================================
 # PAGE CONFIGURATION
-# Must be the very first Streamlit call in the script.
 # ============================================================================
 st.set_page_config(page_title="Bat Acoustic Identification", layout="wide")
 
 
-# ============================================================================
-# GLOBAL CSS — LIGHT MODE (Login page)
-# ============================================================================
-# This block forces a white/light-mode appearance for the login page.
-# After login, a separate dark-mode CSS block overrides most of these rules.
-# The heavy use of !important is necessary because Streamlit's own styles
-# also use !important extensively.
-st.markdown("""
-<style>
+def inject_css(filename: str) -> None:
+    """Load a CSS file from src/ui/ and inject it into the page."""
+    path = Path(__file__).resolve().parent / "src" / "ui" / filename
+    if path.exists():
+        st.markdown(f"<style>\n{path.read_text(encoding='utf-8')}\n</style>", unsafe_allow_html=True)
 
-/* Hide the "View fullscreen" button that appears on images/dataframes */
-button[title="View fullscreen"] { display: none !important; }
-            
-/* ── Root / App background ─────────────────────────────────────────────── */
-:root, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
+
+# Optional display names for species (manifest only has "label" = abbreviation)
+SPECIES_DISPLAY_NAMES: dict[str, tuple[str, str]] = {
+    "TAPMAU": ("Taphozous mauritianus", "Mauritian Tomb Bat"),
+    "TADAEG": ("Tadarida aegyptiaca", "Egyptian Free-tailed Bat"),
+    "OTOMAR": ("Otomops martiensseni", "Large-eared Free-tailed Bat"),
+    "SCODIN": ("Scotophilus dinganii", "African Yellow Bat"),
+    "MINNAT": ("Miniopterus natalensis", "Natal Long-fingered Bat"),
+    "NEOCAP": ("Neoromicia capensis", "Cape Serotine Bat"),
+    "MYOTRI": ("Myotis tricolor", "Temminck's Myotis"),
+    "NYCTHE": ("Nycteris thebaica", "Egyptian Slit-faced Bat"),
+    "RHICAP": ("Rhinolophus capensis", "Cape Horseshoe Bat"),
+    "EPTHOT": ("Eptesicus hotentottus", "Long-tailed Serotine Bat"),
+    "LAEBOT": ("Laephotis botswanae", "Botswana Long-eared Bat"),
+    "SCOVIR": ("Scotophilus viridis", "Greenish Yellow Bat"),
 }
 
-.main, .stApp {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-}
 
-/* Sidebar gets a light grey background to distinguish it from the main area */
-[data-testid="stSidebar"] {
-    background-color: #F0F2F6 !important;
-}
-
-/* ── Text colour defaults ───────────────────────────────────────────────── */
-/* All visible text elements default to black on the light background */
-p, span, div, h1, h2, h3, h4, h5, h6, label {
-    color: #000000 !important;
-}
-
-/* ── Header / Toolbar exceptions ───────────────────────────────────────── */
-/*
- * The Streamlit header bar is dark regardless of theme, so its buttons and
- * icons need white text/fill to remain visible.
- * The selectors below target the header dropdown menus and toolbar buttons.
- */
-
-/* Dropdown menu items inside the header need white text (dark dropdown bg) */
-[data-testid="stHeaderActionElements"] button,
-[data-testid="stHeaderActionElements"] span,
-[data-testid="stHeaderActionElements"] div,
-button[kind="header"],
-header button,
-header span,
-header div[role="menu"] button,
-header div[role="menu"] span,
-[role="menu"] button,
-[role="menu"] span,
-[data-baseweb="menu"] button,
-[data-baseweb="menu"] span,
-.main-menu button,
-.main-menu span {
-    color: #FFFFFF !important;
-}
-
-/* Toolbar buttons (Deploy, menu icon) — white icon + text */
-header button,
-header button span,
-header button div,
-[data-testid="stToolbar"] button,
-[data-testid="stToolbar"] button span,
-[data-testid="stToolbar"] button div,
-[data-testid="stToolbar"] svg,
-[data-testid="stDecoration"] + div button,
-[data-testid="stDecoration"] + div button span {
-    color: #FFFFFF !important;
-    fill: #FFFFFF !important;
-}
-
-/* Some header role=button elements should remain black (e.g. status widget) */
-button[data-testid*="stHeader"],
-button[class*="viewerBadge"],
-[data-testid="stStatusWidget"] button,
-header [role="button"],
-header [role="button"] span,
-header [role="button"] svg,
-header [role="button"] path {
-    color: #000000 !important;
-    fill: #000000 !important;
-}
-
-/* Strip background/border from header toolbar buttons for a clean look */
-header button,
-[data-testid="stToolbar"] button,
-[data-testid="stDecoration"] + div button {
-    background-color: transparent !important;
-    border: none !important;
-}
-
-/* The "three dots" SVG icon in the header should be white */
-header svg,
-[data-testid="stToolbar"] svg,
-header [role="button"] svg {
-    fill: #FFFFFF !important;
-    color: #FFFFFF !important;
-}
-
-/* Subtle circular hover highlight on header buttons */
-header button:hover {
-    background-color: rgba(0, 0, 0, 0.05) !important;
-    border-radius: 50% !important;
-}
-
-/* ── Input fields ───────────────────────────────────────────────────────── */
-input, textarea, [data-baseweb="input"] {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-    border: 1px solid #D3D3D3 !important;
-    border-radius: 0 !important;
-    caret-color: #000000 !important;  /* visible text cursor */
-}
-
-/* ── Dialogs / Modals ───────────────────────────────────────────────────── */
-/*
- * The Deploy and Settings dialogs keep a dark background (#1E1E1E) for
- * contrast, so all text inside them must be white.
- */
-[data-testid="stDialog"] *, 
-[role="dialog"] *, 
-.st-emotion-cache-12w0qpk * {
-    color: #FFFFFF !important;
-}
-
-[role="dialog"] h1, 
-[role="dialog"] h2, 
-[role="dialog"] h3, 
-[role="dialog"] p, 
-[role="dialog"] li {
-    color: #FFFFFF !important;
-}
-
-/* Buttons inside dialogs — black bg with white text */
-[role="dialog"] button {
-    background-color: #000000 !important;
-    color: #FFFFFF !important;
-    border: 1px solid #FFFFFF !important;
-}
-
-/* Hover state for dialog buttons — dark grey with purple border */
-[role="dialog"] button:hover {
-    background-color: #333333 !important;
-    color: #FFFFFF !important;
-    border: 1px solid #B19CD9 !important;
-}
-
-/* Ensure the button <p> tag text stays white too */
-[role="dialog"] button p {
-    color: #FFFFFF !important;
-}
-
-/* Dark background for all dialog/popover/modal containers */
-[data-testid="stDialog"], 
-[role="dialog"], 
-[data-baseweb="popover"],
-[data-baseweb="modal"] {
-    background-color: #1E1E1E !important;
-}
-
-/* All text nodes inside dialogs must be white (repeated for specificity) */
-[role="dialog"] p, 
-[role="dialog"] span, 
-[role="dialog"] label, 
-[role="dialog"] h1, 
-[role="dialog"] h2 {
-    color: #FFFFFF !important;
-}
-
-/* Close (X) button SVG inside dialogs */
-[role="dialog"] button svg {
-    fill: #FFFFFF !important;
-}
-
-/* ── Input focus state ──────────────────────────────────────────────────── */
-/* Highlight active input with a purple border; remove default box-shadow */
-input:focus, textarea:focus, [data-baseweb="input"]:focus {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-    caret-color: #000000 !important;
-    border: 2px solid #B19CD9 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-}
-
-/* More specific selectors for Streamlit's stTextInput wrapper */
-.stTextInput input:focus,
-[data-testid="stTextInput"] input:focus {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-    caret-color: #000000 !important;
-    border: 2px solid #B19CD9 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-}
-
-/* ── Hide "Press Enter to submit form" tooltip ──────────────────────────── */
-[data-testid="InputInstructions"],
-.stTextInput [data-testid="InputInstructions"],
-div[data-testid="InputInstructions"] {
-    display: none !important;
-}
-
-/* Alternative selectors covering different Streamlit builds */
-input + div[role="alert"],
-input + div[class*="instructions"],
-[class*="stTextInput"] div[role="alert"] {
-    display: none !important;
-}
-
-/* ── Form labels ────────────────────────────────────────────────────────── */
-.stTextInput label,
-[data-testid="stTextInput"] label,
-label {
-    font-weight: bold !important;
-    color: #000000 !important;
-}
-
-/* Extra-bold widget labels (Username / Password on login form) */
-[data-testid="stWidgetLabel"] p {
-    font-weight: 800 !important;
-}
-
-/* Bold text on form submit button (Login) */
-[data-testid="stFormSubmitButton"] button p {
-    font-weight: 800 !important;
-}
-
-/* Repeated selectors for robustness across Streamlit versions */
-[data-testid="stWidgetLabel"] p {
-    font-weight: bold !important;
-}
-
-button[kind="formSubmit"] p {
-    font-weight: bold !important;
-}
-
-/* All primary and form-submit buttons get bold text */
-button[kind="primary"],
-button[kind="formSubmit"],
-.stFormSubmitButton button,
-.stButton button {
-    font-weight: bold !important;
-}
-
-/* Bold paragraph text inside any .stButton (e.g. "Save Training Data") */
-.stButton > button p {
-    font-weight: bold !important;
-}
-
-/* ── Dropdowns / Select boxes ───────────────────────────────────────────── */
-[data-baseweb="select"], [data-baseweb="popover"] {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-}
-
-/* ── Generic buttons (light mode) ──────────────────────────────────────── */
-button {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-    border: 1px solid #D3D3D3 !important;
-}
-
-/* ── DataFrames / Tables ────────────────────────────────────────────────── */
-[data-testid="stDataFrame"], [data-testid="stTable"] {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-}
-
-/* ── Layout blocks ──────────────────────────────────────────────────────── */
-[data-testid="stVerticalBlock"], [data-testid="stHorizontalBlock"] {
-    background-color: #FFFFFF !important;
-}
-
-/* ── Form container ─────────────────────────────────────────────────────── */
-[data-testid="stForm"] {
-    background-color: #FFFFFF !important;
-    border: 1px solid #E0E0E0 !important;
-}
-
-/* ── Checkboxes — purple accent colour ──────────────────────────────────── */
-[data-testid="stCheckbox"] input[type="checkbox"] {
-    accent-color: #B19CD9 !important;
-}
-[data-baseweb="checkbox"] span {
-    background-color: #B19CD9 !important;
-    border-color: #B19CD9 !important;
-    outline-color: #B19CD9 !important;
-}
-[data-baseweb="checkbox"] span:hover {
-    background-color: #9b7fc7 !important;  /* slightly darker purple on hover */
-    border-color: #9b7fc7 !important;
-}
-[role="checkbox"][aria-checked="true"] {
-    background-color: #B19CD9 !important;
-    border-color: #B19CD9 !important;
-}
-[role="checkbox"][aria-checked="true"] span {
-    background-color: #B19CD9 !important;
-    border-color: #B19CD9 !important;
-}
-
-/* ── Tabs (light mode) ──────────────────────────────────────────────────── */
-[data-baseweb="tab-list"] {
-    background-color: #F0F2F6 !important;
-}
-[data-baseweb="tab"] {
-    color: #000000 !important;
-}
-
-/* ── Expander ───────────────────────────────────────────────────────────── */
-[data-testid="stExpander"] {
-    background-color: #FFFFFF !important;
-    border: 1px solid #E0E0E0 !important;
-}
-
-/* ── Alert / Info / Warning / Error boxes (light mode) ─────────────────── */
-[data-testid="stAlert"] {
-    background-color: #F0F2F6 !important;
-    color: #000000 !important;
-}
-
-/* ── Metric widgets ─────────────────────────────────────────────────────── */
-[data-testid="stMetric"] {
-    background-color: #F0F2F6 !important;
-    color: #000000 !important;
-}
-
-/* Headings remain black even if a parent rule would make them something else */
-h1, h2, h3, h4, h5, h6 {
-    color: #000000 !important;
-}
-
-/* Utility class for muted / secondary text */
-.gray-text {
-    color: #666666 !important;
-}
-
-/* ── Hide Streamlit hamburger menu & header bar on login page ───────────── */
-header[data-testid="stHeader"] {
-    display: none !important;
-}
-
-/* Remove the default top padding so content starts at the very top */
-[data-testid="stAppViewContainer"] {
-    padding-top: 0rem !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# ============================================================================
-# ADDITIONAL CSS — Hide unwanted DataFrame toolbar buttons
-# ============================================================================
-# Streamlit's DataFrame widget shows toolbar buttons (fullscreen, columns,
-# download). We only want to hide the "Show/hide columns" and "Download as CSV"
-# buttons to keep the interface clean while keeping the search functionality.
-
-# Hide "Show/hide columns" button
-st.markdown("""
-<style>
-/* Most Streamlit builds */
-button[title="Show/hide columns"],
-button[aria-label="Show/hide columns"] { display: none !important; }
-
-/* Scoped to stDataFrame and stDataEditor (newer testids) */
-div[data-testid="stDataFrame"] button[title="Show/hide columns"],
-div[data-testid="stDataFrame"] button[aria-label="Show/hide columns"],
-div[data-testid="stDataEditor"] button[title="Show/hide columns"],
-div[data-testid="stDataEditor"] button[aria-label="Show/hide columns"] { display: none !important; }
-
-/* Fallback via toolbar wrapper */
-div[data-testid="stElementToolbar"] button[title*="Show/hide"],
-div[data-testid="stElementToolbar"] button[aria-label*="Show/hide"] { display: none !important; }
-
-/* Hide the dialog/menu that opens when the button is clicked */
-div[role="dialog"][aria-label="Show/hide columns"],
-div[role="menu"][aria-label="Show/hide columns"] { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
-
-# Hide "Download as CSV" button
-st.markdown("""
-<style>
-/* Most Streamlit builds */
-button[title="Download as CSV"],
-button[aria-label="Download as CSV"] { display:none !important; }
-
-/* Scoped to stDataFrame toolbar */
-div[data-testid="stDataFrame"] button[title="Download as CSV"],
-div[data-testid="stDataFrame"] button[aria-label="Download as CSV"] { display:none !important; }
-
-/* Fallback via toolbar wrapper */
-div[data-testid="stElementToolbar"] button[title*="Download"],
-div[data-testid="stElementToolbar"] button[aria-label*="Download"] { display:none !important; }
-
-/* Extra selectors covering both title-case and lowercase attribute values */
-div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[title*="Download"],
-div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[aria-label*="Download"],
-div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[title*="download"],
-div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[aria-label*="download"] {
-    display: none !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# ============================================================================
-# ADDITIONAL CSS — Button & Tab styling (shared across all pages)
-# ============================================================================
-# All action buttons (Classify, Save, Cancel, etc.) are styled as transparent
-# with a subtle border. On hover/focus they gain a purple (#B19CD9) border.
-# The active tab and the tab highlight bar are also purple.
-st.markdown("""
-<style>
-/* ── Action buttons — transparent with light border ────────────────────── */
-button[kind="primary"],
-button[kind="formSubmit"],
-.stFormSubmitButton button,
-.stButton button {
-    background-color: transparent !important;
-    color: #000000 !important;
-    border: 1px solid rgba(0, 0, 0, 0.2) !important;
-}
-
-/* Hover: swap to purple border */
-button[kind="primary"]:hover,
-button[kind="formSubmit"]:hover,
-.stFormSubmitButton button:hover,
-.stButton button:hover {
-    background-color: transparent !important;
-    color: #000000 !important;
-    border: 2px solid #B19CD9 !important;
-}
-
-/* Focus and active states also use the purple border */
-button[kind="primary"]:focus,
-button[kind="formSubmit"]:focus,
-.stFormSubmitButton button:focus,
-.stButton button:focus {
-    border: 2px solid #B19CD9 !important;
-    box-shadow: none !important;
-}
-button[kind="primary"]:active,
-button[kind="formSubmit"]:active,
-.stFormSubmitButton button:active,
-.stButton button:active {
-    border: 2px solid #B19CD9 !important;
-}
-
-/* ── Tabs — active tab and highlight bar use purple ─────────────────────── */
-button[data-baseweb="tab"][aria-selected="true"],
-.stTabs [data-baseweb="tab"][aria-selected="true"],
-div[data-baseweb="tab-list"] button[aria-selected="true"] {
-    border-bottom-color: #B19CD9 !important;
-    color: #B19CD9 !important;
-}
-
-/* The sliding underline/highlight bar beneath the active tab */
-.stTabs [data-baseweb="tab-highlight"] {
-    background-color: #B19CD9 !important;
-}
-
-/* Active tab text colour */
-.stTabs button[aria-selected="true"] p {
-    color: #B19CD9 !important;
-}
-
-/* Hover colour on non-active tabs */
-.stTabs button[data-baseweb="tab"]:hover,
-button[data-baseweb="tab"]:hover,
-div[data-baseweb="tab-list"] button:hover {
-    color: #B19CD9 !important;
-}
-
-.stTabs button[data-baseweb="tab"]:hover p,
-button[data-baseweb="tab"]:hover p,
-div[data-baseweb="tab-list"] button:hover p {
-    color: #B19CD9 !important;
-}
-
-/* Catch any nested children inside hovered tab buttons */
-.stTabs button:hover *,
-button[data-baseweb="tab"]:hover * {
-    color: #B19CD9 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
+def load_species_from_manifest(project_root: Path, config_path: Path | None = None) -> list[dict] | None:
+    """
+    Load species list from the data manifest (filepath, label, location).
+    Tries project_root / config.manifest_csv, then project_root / scripts / data_manifest.csv.
+    Returns list of {Abbreviation, Latin Name, Common Name}, or None if no manifest found/empty.
+    """
+    config_path = config_path or (project_root / "configs" / "default.yaml")
+    if not config_path.exists():
+        return None
+    cfg = Config.from_yaml(config_path)
+    
+    manifest_path = project_root / cfg.manifest_csv
+    if not manifest_path.exists():
+        manifest_path = project_root / "scripts" / "data_manifest.csv"
+    if not manifest_path.exists():
+        return None
+    try:
+        df = pd.read_csv(manifest_path)
+        if "label" not in df.columns or df.empty:
+            return None
+        labels = sorted(df["label"].dropna().astype(str).unique())
+        if not labels:
+            return None
+        out = []
+        for abbr in labels:
+            latin, common = SPECIES_DISPLAY_NAMES.get(abbr, ("", ""))
+            out.append({
+                "Abbreviation": abbr,
+                "Latin Name": latin or abbr,
+                "Common Name": common or "",
+            })
+        return out
+    except Exception:
+        return None
+
+
+# Inject base (light) styles
+inject_css("styles.css")
 
 # ============================================================================
 # SESSION STATE INITIALIZATION
 # ============================================================================
-# Streamlit re-runs the entire script on every user interaction.
-# We use st.session_state to persist data between re-runs.
-# Each key is only initialised once (using `not in` guard) so that existing
-# data is never accidentally overwritten during a re-run.
-
-# --- Classification results ---
-# known_data: DataFrame of files where the model confidence met the threshold
 if 'known_data' not in st.session_state:
-    st.session_state.known_data = pd.DataFrame(
-        columns=['Filename', 'Species Prediction', 'Confidence Level']
-    )
+    st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
 
-# unknown_data: DataFrame of files that fell below the confidence threshold
 if 'unknown_data' not in st.session_state:
     st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
 
-# List of .wav filenames discovered in the verified source folder
 if 'uploaded_files' not in st.session_state:
     st.session_state.uploaded_files = []
 
-# --- Training data ---
-# Each entry is a dict: {Species, Detector, FileCount, FileNames}
 if 'training_entries' not in st.session_state:
     st.session_state.training_entries = []
 
-# Raw bytes for each uploaded training file, keyed by filename.
-# Bytes are accumulated across multiple submissions so they aren't lost.
 if 'training_file_bytes' not in st.session_state:
-    st.session_state.training_file_bytes = {}
+    st.session_state.training_file_bytes = {}  # filename -> bytes (accumulated across submissions)
 
-# --- Detectors ---
-# Pre-seeded with example South-African detector locations.
-# Each entry is a dict: {Detector ID, Latitude, Longitude}
 if 'detectors' not in st.session_state:
-    st.session_state.detectors = [
-        {"Detector ID": "DET-KZN01", "Latitude": "-29.8587", "Longitude": "31.0218"},
-        {"Detector ID": "DET-WC02",  "Latitude": "-33.9249", "Longitude": "18.4241"},
-        {"Detector ID": "DET-GP03",  "Latitude": "-26.2041", "Longitude": "28.0473"},
-        {"Detector ID": "DET-LP04",  "Latitude": "-23.8962", "Longitude": "29.4486"},
-        {"Detector ID": "DET-EC05",  "Latitude": "-33.0153", "Longitude": "27.9116"},
-        {"Detector ID": "DET-MP06",  "Latitude": "-25.4753", "Longitude": "30.9694"},
-        {"Detector ID": "DET-NC07",  "Latitude": "-28.7282", "Longitude": "24.7499"},
-        {"Detector ID": "DET-NW08",  "Latitude": "-25.8553", "Longitude": "25.6415"},
-        {"Detector ID": "DET-FS09",  "Latitude": "-29.1217", "Longitude": "26.2141"},
-    ]
+    detectors, det_errors = load_detectors_from_db()
+    st.session_state.detectors = detectors
+    if det_errors:
+        for msg in det_errors:
+            st.warning(f"Database warning (detectors): {msg}")
 
-# --- Species ---
-# Pre-seeded with common South-African bat species.
-# Each entry is a dict: {Abbreviation, Latin Name, Common Name}
 if 'species' not in st.session_state:
-    st.session_state.species = [
-        {"Abbreviation": "TAPMAU", "Latin Name": "Taphozous mauritianus",   "Common Name": "Mauritian Tomb Bat"},
-        {"Abbreviation": "TADAEG", "Latin Name": "Tadarida aegyptiaca",     "Common Name": "Egyptian Free-tailed Bat"},
-        {"Abbreviation": "OTOMAR", "Latin Name": "Otomops martiensseni",    "Common Name": "Large-eared Free-tailed Bat"},
-        {"Abbreviation": "SCODIN", "Latin Name": "Scotophilus dinganii",    "Common Name": "African Yellow Bat"},
-        {"Abbreviation": "MINNAT", "Latin Name": "Miniopterus natalensis",  "Common Name": "Natal Long-fingered Bat"},
-        {"Abbreviation": "NEOCAP", "Latin Name": "Neoromicia capensis",     "Common Name": "Cape Serotine Bat"},
-        {"Abbreviation": "MYOTRI", "Latin Name": "Myotis tricolor",         "Common Name": "Temminck's Myotis"},
-        {"Abbreviation": "NYCTHE", "Latin Name": "Nycteris thebaica",       "Common Name": "Egyptian Slit-faced Bat"},
-        {"Abbreviation": "RHICAP", "Latin Name": "Rhinolophus capensis",    "Common Name": "Cape Horseshoe Bat"},
-    ]
+    # Load species strictly from the database (no manifest placeholders)
+    species_from_db, sp_errors = load_species_from_db()
+    if sp_errors:
+        for msg in sp_errors:
+            st.warning(f"Database warning (species): {msg}")
+    st.session_state.species = species_from_db or []
 
-# --- Authentication ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
-# --- Uploader keys ---
-# Incrementing these keys forces Streamlit to re-render the file uploader
-# widgets with an empty state after a successful submission.
 if 'training_uploader_key' not in st.session_state:
     st.session_state.training_uploader_key = 0
 
 if 'file_uploader_key' not in st.session_state:
     st.session_state.file_uploader_key = 0
 
-# --- Classify tab state ---
-# Path of the folder the user entered and verified as containing .wav files
 if 'source_folder' not in st.session_state:
     st.session_state.source_folder = ""
 
-# Legacy result message placeholder (currently unused but kept for compatibility)
 if 'org_result_msg' not in st.session_state:
     st.session_state.org_result_msg = None
 
-# Controls whether the "move identified files" inline form is visible
 if 'show_id_folder_form' not in st.session_state:
     st.session_state.show_id_folder_form = False
 
-# Controls whether the "move unknown files" inline form is visible
 if 'show_unk_folder_form' not in st.session_state:
     st.session_state.show_unk_folder_form = False
 
-# Stores the result dict from the last "move identified files" operation
 if 'id_folder_result' not in st.session_state:
     st.session_state.id_folder_result = None
 
-# Stores the result dict from the last "move unknown files" operation
 if 'unk_folder_result' not in st.session_state:
     st.session_state.unk_folder_result = None
 
@@ -627,102 +195,71 @@ if 'unk_folder_result' not in st.session_state:
 # HELPER FUNCTIONS
 # ============================================================================
 
-def process_audio_files(wav_filenames):
+
+def _file_like_from_disk(source_folder: str, filename: str):
+    """Build a file-like object (with .name and .getvalue()) for classify_uploaded_files."""
+    path = Path(source_folder) / filename
+    if not path.is_file():
+        return None
+
+    class FileLike:
+        def __init__(self, name: str, path: Path):
+            self.name = name
+            self._path = path
+
+        def getvalue(self):
+            return self._path.read_bytes()
+
+    return FileLike(filename, path)
+
+
+def process_audio_files(
+    source_folder: str,
+    wav_filenames: list[str],
+    model_path: str | None = None,
+):
     """
-    Simulate ML classification of a list of .wav filenames.
-
-    For each filename a random confidence score is generated.
-    Files with confidence >= 0.75 are classified as KNOWN (identified species);
-    files below the threshold are classified as UNKNOWN.
-
-    NOTE: This is a placeholder. In production this would call the actual
-    trained acoustic model with the audio data.
-
-    Parameters
-    ----------
-    wav_filenames : list[str]
-        Filenames of the .wav files to classify (no bytes are read here).
-
-    Returns
-    -------
-    known_df : pd.DataFrame
-        Columns: Filename, Species Prediction, Confidence Level
-    unknown_df : pd.DataFrame
-        Columns: Filename
+    Classify .wav files from the given folder using the ML model (classify_app).
+    model_path: optional path to .pt checkpoint; if None, classify_app uses its default.
+    Returns (known_df, unknown_df) with columns Filename, Species Prediction, Confidence Level.
     """
-    import random
+    file_objects = []
+    missing_or_skipped = []
 
-    known_results   = []
-    unknown_results = []
-
-    # Hard-coded placeholder species pool used until a real model is integrated
-    placeholder_species = [
-        'Myotis lucifugus',
-        'Eptesicus fuscus',
-        'Lasiurus borealis',
-        'Myotis septentrionalis',
-        'Perimyotis subflavus',
-    ]
-
-    confidence_threshold = 0.75  # Files below this score go to the UNKNOWN table
-
-    for filename in wav_filenames:
-        confidence = random.uniform(0.5, 0.99)
-
-        if confidence >= confidence_threshold:
-            # Sufficient confidence — pick a random species as the prediction
-            predicted_species = random.choice(placeholder_species)
-            known_results.append({
-                'Filename':           filename,
-                'Species Prediction': predicted_species,
-                'Confidence Level':   f"{confidence * 100:.2f}%",
-            })
+    for fn in wav_filenames:
+        if not fn.lower().endswith(".wav"):
+            missing_or_skipped.append({"Filename": fn})
+            continue
+        fl = _file_like_from_disk(source_folder, fn)
+        if fl is not None:
+            file_objects.append(fl)
         else:
-            # Low confidence — mark as unknown
-            unknown_results.append({'Filename': filename})
+            missing_or_skipped.append({"Filename": fn})
 
-    known_df   = pd.DataFrame(known_results)
-    unknown_df = pd.DataFrame(unknown_results)
+    known_df, unknown_df = classify_uploaded_files(file_objects, model_path=model_path)
+
+    if missing_or_skipped:
+        unknown_df = pd.concat(
+            [unknown_df, pd.DataFrame(missing_or_skipped)],
+            ignore_index=True,
+        )
+
     return known_df, unknown_df
 
 
 def convert_df_to_csv(df):
-    """
-    Encode a DataFrame as a UTF-8 CSV byte string suitable for st.download_button.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-
-    Returns
-    -------
-    bytes
-    """
+    """Convert a DataFrame to CSV format for download."""
     return df.to_csv(index=False).encode('utf-8')
 
 
 def organise_files(source_folder, identified_folder, unknown_folder,
                    known_filenames, unknown_filenames):
     """
-    Move classified .wav files from the source folder into separate
-    identified and unknown destination folders.
+    Move identified and unknown .wav files from source_folder into the
+    respective destination folders.  Files are MOVED (not copied) so there
+    is no duplication.
 
-    Files are MOVED (not copied) to avoid duplication. Destination folders
-    are created automatically if they do not already exist.
-
-    Parameters
-    ----------
-    source_folder      : str  — Path that was verified in Step 1 of the Classify tab.
-    identified_folder  : str  — Destination for files with a confident species prediction.
-    unknown_folder     : str  — Destination for files whose confidence was too low.
-    known_filenames    : list[str]  — Filenames from the identified species table.
-    unknown_filenames  : list[str]  — Filenames from the unknown species table.
-
-    Returns
-    -------
-    moved_identified : list[str]  — Successfully moved identified files.
-    moved_unknown    : list[str]  — Successfully moved unknown files.
-    errors           : list[str]  — Error messages for any files that could not be moved.
+    Returns (moved_identified, moved_unknown, errors) as lists of strings.
     """
     import os, shutil
 
@@ -730,8 +267,8 @@ def organise_files(source_folder, identified_folder, unknown_folder,
     moved_unknown    = []
     errors           = []
 
+    # Helper: create folder if it does not exist
     def ensure_dir(path):
-        """Create a directory (and any missing parents). Return True on success."""
         try:
             os.makedirs(path, exist_ok=True)
             return True
@@ -739,35 +276,29 @@ def organise_files(source_folder, identified_folder, unknown_folder,
             errors.append(f"Could not create folder '{path}': {exc}")
             return False
 
-    # Validate source folder exists before attempting anything
     if not os.path.isdir(source_folder):
         errors.append(f"Source folder not found: '{source_folder}'")
         return moved_identified, moved_unknown, errors
 
-    # Ensure both destination folders exist (create them if necessary)
     if not ensure_dir(identified_folder):
         return moved_identified, moved_unknown, errors
+
     if not ensure_dir(unknown_folder):
         return moved_identified, moved_unknown, errors
 
     def move_files(filenames, dest_folder, moved_list):
-        """
-        Move each file in `filenames` from source_folder into dest_folder.
-        Appends results to moved_list and errors.
-        """
         for fname in filenames:
             src = os.path.join(source_folder, fname)
             dst = os.path.join(dest_folder, fname)
 
             if not os.path.isfile(src):
-                # File may have been moved in a previous run
+                # File might already have been moved in a previous run
                 if os.path.isfile(dst):
                     moved_list.append(f"{fname} (already in destination)")
                 else:
                     errors.append(f"File not found in source: '{fname}'")
                 continue
 
-            # Guard against source == destination (would silently delete the file)
             if os.path.abspath(src) == os.path.abspath(dst):
                 moved_list.append(f"{fname} (already in destination)")
                 continue
@@ -785,395 +316,120 @@ def organise_files(source_folder, identified_folder, unknown_folder,
 
 
 # ============================================================================
+# MAIN UI LAYOUT
+# ============================================================================
+
+# ============================================================================
 # LOGIN PAGE
 # ============================================================================
-# If the user is not yet authenticated we show a centred login form and then
-# call st.stop() to prevent any of the main app UI from rendering.
 if not st.session_state.logged_in:
-
-    # Add vertical whitespace to visually centre the form on the page
     st.markdown("<br><br><br>", unsafe_allow_html=True)
-
-    # Use a 3-column layout so the form appears in the centre column
+    
     col1, col2, col3 = st.columns([1, 2, 1])
-
+    
     with col2:
-        # App logo
-        st.image("batlablogo.PNG", use_column_width=True)
+        # Display BatLab logo
+        st.image("batlablogo.PNG", use_container_width=True)
         st.markdown("<br>", unsafe_allow_html=True)
-
-        # Page heading
-        st.markdown(
-            "<h2 style='text-align: center; color: #000000; font-weight: bold;'>Please Login</h2>",
-            unsafe_allow_html=True,
-        )
+        st.markdown("<h2 style='text-align: center; color: #000000; font-weight: bold;'>Please Login</h2>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
-
-        # Login form — wrapped in st.form so both fields submit together
+        
         with st.form("login_form"):
             username = st.text_input("Username", placeholder="Enter your username")
             password = st.text_input("Password", type="password", placeholder="Enter your password")
-
+            
             login_button = st.form_submit_button("Login", use_container_width=True)
-
+            
             if login_button:
-                # NOTE: Hard-coded credentials. Replace with a proper auth
-                # mechanism (e.g. hashed passwords in a database) for production.
                 if username == "admin" and password == "password":
                     st.session_state.logged_in = True
                     st.success("Login successful!")
-                    time.sleep(0.5)   # brief pause so the success message is visible
+                    time.sleep(0.5)
                     st.rerun()
                 else:
                     st.error("Invalid login credentials. Please try again.")
-
-    # Stop script execution here — nothing below this line renders for logged-out users
+    
     st.stop()
 
 
 # ============================================================================
-# MAIN APPLICATION — only reached after successful login
+# MAIN APPLICATION (After Login)
 # ============================================================================
 
 if st.session_state.logged_in:
-    # --------------------------------------------------------------------------
-    # DARK MODE CSS (Main App)
-    # --------------------------------------------------------------------------
-    # After login the app switches to a black (#000000) background with white
-    # text and purple (#B19CD9) accent colour for tabs, radio buttons, etc.
-    st.markdown("""
-        <style>
-            
-        /* ── Equal-width tabs ─────────────────────────────────────────────── */
-        div[data-baseweb="tab-list"] {
-            display: flex !important;
-            width: 100% !important;
-        }
+    inject_css("theme_dark.css")
 
-        /* Each tab stretches to fill an equal share of the tab bar */
-        div[data-baseweb="tab-list"] button {
-            flex: 1 !important;
-            justify-content: center !important;
-        }
-
-        /* ── Tab text style ───────────────────────────────────────────────── */
-        button[data-baseweb="tab"] {
-            font-size: 18px !important;
-            font-weight: 700 !important;
-            text-align: center !important;
-            padding: 12px 0px !important;
-        }
-
-        /* Inner <p> tag inside tab buttons — match parent font */
-        button[data-baseweb="tab"] p {
-            font-size: 18px !important;
-            font-weight: 700 !important;
-        }
-
-        /* Small gap between tabs */
-        div[data-baseweb="tab-list"] {
-            gap: 8px !important;
-        }
-            
-        /* ── Background — force black across the entire app ──────────────── */
-        :root {
-            background-color: #000000 !important;
-        }
-        body {
-            background-color: #000000 !important;
-        }
-        .main, .stApp, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
-            background-color: #000000 !important;
-        }
-
-        /* Containers and blocks use transparent bg so the black root shows through */
-        div, section, [data-testid="stVerticalBlock"], [data-testid="stHorizontalBlock"] {
-            background-color: transparent !important;
-        }
-
-        /* Main content block */
-        .main .block-container {
-            background-color: #000000 !important;
-        }
-
-        /* ── Text — force white ───────────────────────────────────────────── */
-        p, span, div, h1, h2, h3, h4, h5, h6, label, li {
-            color: #FFFFFF !important;
-        }
-
-        /* ── Sidebar ──────────────────────────────────────────────────────── */
-        [data-testid="stSidebar"] {
-            background-color: #000000 !important;
-        }
-
-        /* ── Tabs (dark mode) ─────────────────────────────────────────────── */
-        /* Inactive tabs: purple text, no border */
-        button[data-baseweb="tab"] {
-            color: #B19CD9 !important;
-            background-color: transparent !important;
-            border: none !important;
-            outline: none !important;
-            box-shadow: none !important;
-        }
-
-        /* Active tab: purple text with a bottom border underline */
-        button[data-baseweb="tab"][aria-selected="true"] {
-            color: #B19CD9 !important;
-            border-bottom-color: #B19CD9 !important;
-            background-color: transparent !important;
-            border: none !important;
-            border-bottom: 2px solid #B19CD9 !important;
-            outline: none !important;
-            box-shadow: none !important;
-        }
-
-        /* Tab bar background */
-        [data-baseweb="tab-list"] {
-            background-color: #000000 !important;
-        }
-
-        /* Remove focus ring on tabs (already indicated by the bottom border) */
-        button[data-baseweb="tab"]:focus {
-            outline: none !important;
-            box-shadow: none !important;
-        }
-
-        /* ── DataFrames / Tables (dark mode) ─────────────────────────────── */
-        [data-testid="stDataFrame"], [data-testid="stTable"] {
-            background-color: #000000 !important;
-            color: #FFFFFF !important;
-        }
-
-        /* ── Input fields (dark mode) ─────────────────────────────────────── */
-        input, textarea, [data-baseweb="input"] {
-            background-color: #1A1A1A !important;  /* very dark grey */
-            color: #FFFFFF !important;
-            border: 1px solid #444444 !important;
-            caret-color: #FFFFFF !important;
-        }
-
-        /* ── Forms ────────────────────────────────────────────────────────── */
-        [data-testid="stForm"] {
-            background-color: #000000 !important;
-            border: 1px solid #333333 !important;
-        }
-
-        /* ── File uploader ────────────────────────────────────────────────── */
-        [data-testid="stFileUploader"] {
-            background-color: #1A1A1A !important;
-        }
-
-        /* "Browse files" button inside the uploader — black bg, white text */
-        [data-testid="stFileUploader"] button,
-        [data-testid="stFileUploaderDropzone"] button {
-            background-color: #000000 !important;
-            color: #FFFFFF !important;
-            border: 1px solid #FFFFFF !important;
-        }
-
-        /* Hover: switch border to purple */
-        [data-testid="stFileUploader"] button:hover,
-        [data-testid="stFileUploaderDropzone"] button:hover {
-            background-color: #000000 !important;
-            color: #FFFFFF !important;
-            border: 2px solid #B19CD9 !important;
-        }
-
-        /* ── Radio buttons ────────────────────────────────────────────────── */
-        [role="radiogroup"] {
-            background-color: #000000 !important;
-        }
-
-        /* Override browser default radio appearance with a custom white circle */
-        input[type="radio"],
-        [data-testid="stRadio"] input[type="radio"],
-        [role="radiogroup"] input[type="radio"] {
-            appearance: none !important;
-            -webkit-appearance: none !important;
-            -moz-appearance: none !important;
-            width: 18px !important;
-            height: 18px !important;
-            min-width: 18px !important;
-            min-height: 18px !important;
-            border: 2px solid #FFFFFF !important;
-            border-radius: 50% !important;
-            margin-right: 10px !important;
-            cursor: pointer !important;
-            background-color: transparent !important;
-            position: relative !important;
-            flex-shrink: 0 !important;
-            display: inline-block !important;
-        }
-
-        /* Checked radio: filled with purple */
-        input[type="radio"]:checked,
-        [data-testid="stRadio"] input[type="radio"]:checked,
-        [role="radiogroup"] input[type="radio"]:checked {
-            background-color: #B19CD9 !important;
-            border: 2px solid #FFFFFF !important;
-        }
-
-        /* Hover: purple border to hint that the option is clickable */
-        input[type="radio"]:hover,
-        [data-testid="stRadio"] input[type="radio"]:hover {
-            border-color: #B19CD9 !important;
-        }
-
-        /* Radio labels — flex layout keeps the circle and text aligned */
-        [role="radiogroup"] label,
-        [data-testid="stRadio"] label {
-            cursor: pointer !important;
-            display: flex !important;
-            align-items: center !important;
-            padding: 8px 0 !important;
-            color: #FFFFFF !important;
-        }
-
-        /* Span elements inside radio groups (Streamlit's custom elements) */
-        [role="radiogroup"] span,
-        [data-testid="stRadio"] span {
-            color: #FFFFFF !important;
-        }
-
-        /* ── All buttons — purple border on hover ─────────────────────────── */
-        button:hover {
-            border: 2px solid #B19CD9 !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-
-# ============================================================================
-# APP HEADER
-# ============================================================================
+# Header
 st.title("Welcome to the BatLab!")
 st.markdown("Analyze bat acoustic calls and identify species using machine learning")
 st.markdown("---")
 
-
-# ============================================================================
-# TAB LAYOUT
-# ============================================================================
-# The app is organised into 5 tabs. Each tab renders its own section below.
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "Classify",
-    "Add Detector",
-    "Add Species",
-    "Add Training Data",
-    "Train New Model",
-])
-
+# Create tabs
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Classify", "Add Detector", "Add Species", "Add Training Data", "Train New Model"])
 
 # ============================================================================
 # TAB 1: CLASSIFY
 # ============================================================================
-# Workflow:
-#   Step 1 — User enters a local folder path containing .wav files.
-#   Step 2 — User clicks "Classify" to run the audio classification.
-#   Step 3 — Results are shown in two tables:
-#             • Identified Species (confidence >= threshold)
-#             • Unknown Species    (confidence <  threshold)
-#   Each table has an optional "Create Folder & Move Files" action so the
-#   user can physically sort the files on disk.
 with tab1:
-
-    # ── Tab-specific CSS overrides ───────────────────────────────────────────
-    # Alert boxes in this tab use a dark-purple background instead of the
-    # default light-grey, to remain readable on the dark app background.
-    st.markdown("""
-    <style>
-                
-    /* Alert boxes (info, warning, success, error) — dark purple background */
-    div[data-testid="stAlert"] {
-        background-color: #2b0a3d !important;
-        color: #FFFFFF !important;
-        border-radius: 8px !important;
-    }
-    div[data-testid="stAlert"] p {
-        color: #FFFFFF !important;
-    }
-                
-    /* File uploader "Browse files" button — purple text and border on hover */
-    [data-testid="stFileUploader"] button:hover {
-        color: #B19CD9 !important;
-        border: 2px solid #B19CD9 !important;
-    }
-    [data-testid="stFileUploader"] button:hover * {
-        color: #B19CD9 !important;
-    }
-
-    /* Download ZIP button — solid black background with white text */
-    [data-testid="stDownloadButton"] button {
-        background-color: #000000 !important;
-        color: #FFFFFF !important;
-        border: 1px solid #000000 !important;
-    }
-    [data-testid="stDownloadButton"] button p {
-        color: #FFFFFF !important;
-    }
-    /* Hover: darken slightly and add purple border */
-    [data-testid="stDownloadButton"] button:hover {
-        background-color: #222222 !important;
-        color: #FFFFFF !important;
-        border: 2px solid #B19CD9 !important;
-    }
-    [data-testid="stDownloadButton"] button:hover p {
-        color: #FFFFFF !important;
-    }
-                
-    </style>
-    """, unsafe_allow_html=True)
-
     st.markdown("---")
     st.header("Classify Bat Acoustic Calls")
 
-    # ── "Start New Session" button ───────────────────────────────────────────
-    # Only shown when there are existing results so the user can reset cleanly.
+    # ── Start New Session ────────────────────────────────────────────────────
     if not st.session_state.known_data.empty or not st.session_state.unknown_data.empty:
         col1, col2 = st.columns([3, 1])
         with col2:
-            if st.button("**Start New Session**", use_container_width=True):
-                # Clear all classification-related state
-                st.session_state.known_data    = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
-                st.session_state.unknown_data  = pd.DataFrame(columns=['Filename'])
+            if st.button("**Start New Session**", use_container_width=True, key="btn_start_new_session"):
+                st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
+                st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
                 st.session_state.uploaded_files = []
                 st.session_state.org_result_msg = None
                 st.session_state.source_folder  = ""
                 st.session_state.show_id_folder_form  = False
                 st.session_state.show_unk_folder_form = False
-                st.session_state.id_folder_result     = None
-                st.session_state.unk_folder_result    = None
-                # Bump the key to force the file-uploader widget to reset
+                st.session_state.id_folder_result  = None
+                st.session_state.unk_folder_result = None
                 st.session_state.file_uploader_key += 1
                 st.success("✅ Session reset! Ready for new files.")
                 st.rerun()
 
     st.markdown("---")
 
-    # ── STEP 1: Source folder path ───────────────────────────────────────────
-    st.markdown("### Step 1 — Enter the source folder path")
+    # ── STEP 1: Model Selector ─────────────────────────────────────────────────────
+    st.markdown("### Step 1 — Select a Model")
+    model_options = get_available_models()
+    if model_options:
+        labels = [o[0] for o in model_options]
+        label_to_path = {o[0]: o[1] for o in model_options}
+        selected_label = st.selectbox(
+            "Model",
+            labels,
+            key="classify_model_select",
+            help="Colab (base) or a subset model trained in the Train New Model tab.",
+        )
+        selected_model_path = label_to_path.get(selected_label)
+    else:
+        selected_model_path = None
+        st.warning(
+            "No models found. Add model_checkpoints/colab/best_model.pt or train a subset model in the Train New Model tab."
+        )
+
+    st.markdown("---")
+    
+    # ── STEP 2: Source folder path ───────────────────────────────────────────
+    st.markdown("### Step 2 — Enter the source folder path")
 
     import os
-    from pathlib import Path
-
     source_input = st.text_input(
         "Source folder path *",
         value=st.session_state.source_folder,
         placeholder=r"e.g.  /Users/you/BatRecordings  or  C:\BatRecordings",
-        key="source_folder_input",
+        key="source_folder_input"
     )
-
-    if st.button("**Verify Path & Load Files**", use_container_width=True):
+    if st.button("**Verify Path & Load Files**", use_container_width=True, key="btn_verify_path"):
         raw_input = (source_input or "").strip()
-
         if not raw_input:
             st.error("Please enter a folder path.")
         else:
-            # Normalise the path for the current OS:
-            #   • Expands ~ to the user's home directory on all platforms
-            #   • Converts forward/back slashes to the OS separator
-            #     (so Windows users can paste Mac-style paths and vice versa)
-            #   • Resolves any . / .. components
             try:
                 source_path = Path(raw_input).expanduser().resolve()
             except Exception as exc:
@@ -1184,53 +440,48 @@ with tab1:
                 if not source_path.is_dir():
                     st.error(f"Path not found or is not a folder: '{source_path}'")
                 else:
-                    # Scan the folder for .wav files (case-insensitive extension check)
                     wav_files = [f.name for f in source_path.iterdir()
                                  if f.is_file() and f.suffix.lower() == '.wav']
-
                     if not wav_files:
                         st.warning(f"No .wav files found in '{source_path}'.")
                     else:
-                        # Store the normalised string path so the rest of the app
-                        # (organise_files, move logic, etc.) continues to work as-is
                         normalised = str(source_path)
-                        st.session_state.source_folder  = normalised
+                        st.session_state.source_folder = normalised
                         st.session_state.uploaded_files = wav_files
-                        st.session_state.known_data     = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
-                        st.session_state.unknown_data   = pd.DataFrame(columns=['Filename'])
-                        st.session_state.id_folder_result  = None
+                        st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
+                        st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
+                        st.session_state.id_folder_result = None
                         st.session_state.unk_folder_result = None
                         st.success(f"✅ Found {len(wav_files)} .wav file(s) in '{normalised}'.")
                         st.rerun()
 
-    # Show a summary of the verified source folder if one has been set
+    # Show current verified folder and file count
     if st.session_state.source_folder and st.session_state.uploaded_files:
-        st.info(
-            f"**Source:** `{st.session_state.source_folder}` — "
-            f"**{len(st.session_state.uploaded_files)}** .wav file(s) ready for classification."
-        )
+        st.info(f"**Source:** `{st.session_state.source_folder}` — "
+                f"**{len(st.session_state.uploaded_files)}** .wav file(s) ready for classification.")
 
     st.markdown("---")
 
-    # ── STEP 2: Classify ─────────────────────────────────────────────────────
-    st.markdown("### Step 2 — Classify")
+    # ── STEP 3: Classify ─────────────────────────────────────────────────────
+    st.markdown("### Step 3 — Classify")
 
-    # Disable the button until a valid source folder with files has been verified
     classify_disabled = not bool(st.session_state.source_folder and st.session_state.uploaded_files)
 
     with st.form("classify_form"):
         submitted = st.form_submit_button(
             "Classify",
             use_container_width=True,
-            disabled=classify_disabled,
+            disabled=classify_disabled
         )
 
         if submitted and not classify_disabled:
             with st.spinner("Analyzing audio files… Please wait."):
-                time.sleep(2)  # Simulated processing delay
-                known_df, unknown_df = process_audio_files(st.session_state.uploaded_files)
+                known_df, unknown_df = process_audio_files(
+                    st.session_state.source_folder,
+                    st.session_state.uploaded_files,
+                    model_path=selected_model_path,
+                )
 
-                # Append new results to any existing data (supports incremental runs)
                 if not known_df.empty:
                     st.session_state.known_data = pd.concat(
                         [st.session_state.known_data, known_df], ignore_index=True
@@ -1244,59 +495,54 @@ with tab1:
 
     st.markdown("---")
 
-    # ── IDENTIFIED SPECIES TABLE ─────────────────────────────────────────────
+    # ── IDENTIFIED SPECIES TABLE + MOVE-TO-FOLDER ────────────────────────────
     if not st.session_state.known_data.empty:
         known_count = len(st.session_state.known_data)
         st.subheader(f"😄 Identified Species — {known_count} file{'s' if known_count != 1 else ''}")
-
         st.dataframe(
             st.session_state.known_data,
             use_container_width=True,
             hide_index=True,
             height=400,
             column_config={
-                "Filename":           st.column_config.TextColumn("Filename"),
+                "Filename": st.column_config.TextColumn("Filename"),
                 "Species Prediction": st.column_config.TextColumn("Species Prediction"),
-                "Confidence Level":   st.column_config.TextColumn("Confidence Level"),
-            },
+                "Confidence Level": st.column_config.TextColumn("Confidence Level"),
+            }
         )
 
-        # ── Move identified files to a folder ────────────────────────────────
-        # Toggling this button shows/hides the inline form for entering a path.
         if st.button("**Create New Folder for Identified Sound Files**",
                      key="btn_id_folder", use_container_width=True):
             st.session_state.show_id_folder_form = not st.session_state.show_id_folder_form
-            st.session_state.id_folder_result    = None  # clear any previous result
+            st.session_state.id_folder_result = None
 
         if st.session_state.show_id_folder_form:
             with st.form("id_folder_form"):
                 st.markdown("**Enter the full path for the new identified species folder**")
                 st.markdown(
-                    "The folder will be created if it does not exist, and files will be "
-                    "**moved** from the source folder."
+                    "The folder will be created if it does not exist. Files will be **moved** "
+                    "from the source folder into species subfolders (e.g. `Identified_Bats/Myotis lucifugus/`)."
                 )
                 id_folder_path = st.text_input(
                     "Destination folder path *",
-                    placeholder=r"e.g.  /Users/you/Identified_Bats  or  C:\Identified_Bats",
+                    placeholder=r"e.g.  /Users/you/Identified_Bats  or  C:\Identified_Bats"
                 )
                 col_save_id, col_cancel_id = st.columns(2)
                 with col_save_id:
                     confirm_id = st.form_submit_button("**Create Folder & Move Files**", use_container_width=True)
                 with col_cancel_id:
-                    cancel_id  = st.form_submit_button("**Cancel**", use_container_width=True)
+                    cancel_id = st.form_submit_button("**Cancel**", use_container_width=True)
 
                 if cancel_id:
-                    # User cancelled — hide the form
                     st.session_state.show_id_folder_form = False
                     st.rerun()
 
                 if confirm_id:
                     import os, shutil
-                    from pathlib import Path as _Path
                     raw_id = (id_folder_path or "").strip()
                     if raw_id:
                         try:
-                            id_folder_path = str(_Path(raw_id).expanduser().resolve())
+                            id_folder_path = str(Path(raw_id).expanduser().resolve())
                         except Exception:
                             id_folder_path = raw_id
                     else:
@@ -1305,31 +551,15 @@ with tab1:
                     if not id_folder_path:
                         st.error("Please enter a destination folder path.")
                     elif os.path.abspath(id_folder_path) == os.path.abspath(st.session_state.source_folder):
-                        # Prevent moving files back into their source folder
                         st.error("Destination must be different from the source folder.")
                     else:
                         known_names = st.session_state.known_data['Filename'].tolist()
-
-                        # Create the top-level destination folder
-                        try:
-                            os.makedirs(id_folder_path, exist_ok=True)
-                        except Exception as exc:
-                            st.error(f"Could not create folder: {exc}")
-                            st.stop()
-
-                        # Move each file into a species subfolder named after the
-                        # model's predicted species for that file.
-                        # e.g. prediction "Myotis lucifugus" → id_folder_path/Myotis lucifugus/
-                        # Falls back to "Unknown_Species" if no prediction is found.
-
-                        # Build a filename → predicted species lookup from known_data
                         prediction_lookup = dict(
                             zip(
                                 st.session_state.known_data['Filename'],
                                 st.session_state.known_data['Species Prediction'],
                             )
                         )
-
                         moved, failed = [], []
                         for fname in known_names:
                             src = os.path.join(st.session_state.source_folder, fname)
@@ -1337,16 +567,11 @@ with tab1:
                                 failed.append(f"{fname} (not found in source)")
                                 continue
 
-                            # Use the model's predicted species as the subfolder name
                             species_code = prediction_lookup.get(fname, "Unknown_Species")
-
-                            # Sanitise the species name for use as a folder name
-                            # (replace characters that are invalid on Windows/Mac/Linux)
                             safe_species = species_code.replace("/", "-").replace("\\", "-").strip()
                             if not safe_species:
                                 safe_species = "Unknown_Species"
 
-                            # Create the species subfolder if it doesn't exist
                             species_folder = os.path.join(id_folder_path, safe_species)
                             try:
                                 os.makedirs(species_folder, exist_ok=True)
@@ -1361,67 +586,59 @@ with tab1:
                             except Exception as exc:
                                 failed.append(f"{fname} ({exc})")
 
-                        # Store the result so it persists after st.rerun()
                         st.session_state.id_folder_result = {
-                            "path":   id_folder_path,
-                            "moved":  moved,
+                            "path": id_folder_path,
+                            "moved": moved,
                             "failed": failed,
                         }
                         st.session_state.show_id_folder_form = False
                         st.rerun()
 
-        # Show the result of the last "move identified files" operation
         if st.session_state.id_folder_result:
             res = st.session_state.id_folder_result
             if res["moved"]:
-                st.success(f"Moved **{len(res['moved'])}** file(s) into species subfolders under `{res['path']}`.")
-            if res["failed"]:
-                st.warning(
-                    "The following files could not be moved:\n"
-                    + "\n".join(f"• {f}" for f in res["failed"])
+                st.success(
+                    f"Moved **{len(res['moved'])}** file(s) into species subfolders under `{res['path']}`."
                 )
+            if res["failed"]:
+                st.warning("The following files could not be moved:\n" +
+                           "\n".join(f"• {f}" for f in res["failed"]))
 
     else:
-        # No results yet — prompt the user to run the classifier
         st.info("No identified species yet. Verify a source folder and run classify to get started!")
 
     st.markdown("---")
 
-    # ── UNKNOWN SPECIES TABLE ────────────────────────────────────────────────
+    # ── UNKNOWN SPECIES TABLE + MOVE-TO-FOLDER ───────────────────────────────
     if not st.session_state.unknown_data.empty:
         unknown_count = len(st.session_state.unknown_data)
         st.subheader(f"🤔 Unknown Species — {unknown_count} file{'s' if unknown_count != 1 else ''}")
-
         st.dataframe(
             st.session_state.unknown_data,
             use_container_width=True,
             hide_index=True,
-            height=400,
+            height=400
         )
 
-        # ── Move unknown files to a folder ───────────────────────────────────
-        # Same pattern as the identified-files section above.
         if st.button("**Create New Folder for Unknown Sound Files**",
                      key="btn_unk_folder", use_container_width=True):
             st.session_state.show_unk_folder_form = not st.session_state.show_unk_folder_form
-            st.session_state.unk_folder_result    = None
+            st.session_state.unk_folder_result = None
 
         if st.session_state.show_unk_folder_form:
             with st.form("unk_folder_form"):
                 st.markdown("**Enter the full path for the new unknown species folder**")
-                st.markdown(
-                    "The folder will be created if it does not exist, and files will be "
-                    "**moved** from the source folder."
-                )
+                st.markdown("The folder will be created if it does not exist, and files will be "
+                            "**moved** from the source folder.")
                 unk_folder_path = st.text_input(
                     "Destination folder path *",
-                    placeholder=r"e.g.  /Users/you/Unknown_Bats  or  C:\Unknown_Bats",
+                    placeholder=r"e.g.  /Users/you/Unknown_Bats  or  C:\Unknown_Bats"
                 )
                 col_save_unk, col_cancel_unk = st.columns(2)
                 with col_save_unk:
                     confirm_unk = st.form_submit_button("**Create Folder & Move Files**", use_container_width=True)
                 with col_cancel_unk:
-                    cancel_unk  = st.form_submit_button("**Cancel**", use_container_width=True)
+                    cancel_unk = st.form_submit_button("**Cancel**", use_container_width=True)
 
                 if cancel_unk:
                     st.session_state.show_unk_folder_form = False
@@ -1429,11 +646,10 @@ with tab1:
 
                 if confirm_unk:
                     import os, shutil
-                    from pathlib import Path as _Path
                     raw_unk = (unk_folder_path or "").strip()
                     if raw_unk:
                         try:
-                            unk_folder_path = str(_Path(raw_unk).expanduser().resolve())
+                            unk_folder_path = str(Path(raw_unk).expanduser().resolve())
                         except Exception:
                             unk_folder_path = raw_unk
                     else:
@@ -1445,15 +661,11 @@ with tab1:
                         st.error("Destination must be different from the source folder.")
                     else:
                         unknown_names = st.session_state.unknown_data['Filename'].tolist()
-
-                        # Create the destination folder
                         try:
                             os.makedirs(unk_folder_path, exist_ok=True)
                         except Exception as exc:
                             st.error(f"Could not create folder: {exc}")
                             st.stop()
-
-                        # Move each unknown file one by one
                         moved, failed = [], []
                         for fname in unknown_names:
                             src = os.path.join(st.session_state.source_folder, fname)
@@ -1466,36 +678,29 @@ with tab1:
                                 moved.append(fname)
                             except Exception as exc:
                                 failed.append(f"{fname} ({exc})")
-
-                        # Persist result across re-run
                         st.session_state.unk_folder_result = {
-                            "path":   unk_folder_path,
-                            "moved":  moved,
+                            "path": unk_folder_path,
+                            "moved": moved,
                             "failed": failed,
                         }
                         st.session_state.show_unk_folder_form = False
                         st.rerun()
 
-        # Show the result of the last "move unknown files" operation
         if st.session_state.unk_folder_result:
             res = st.session_state.unk_folder_result
             if res["moved"]:
-                st.success(f"Moved **{len(res['moved'])}** file(s) to `{res['path']}`.")
-            if res["failed"]:
-                st.warning(
-                    "The following files could not be moved:\n"
-                    + "\n".join(f"• {f}" for f in res["failed"])
+                st.success(
+                    f"Moved **{len(res['moved'])}** file(s) to `{res['path']}`."
                 )
+            if res["failed"]:
+                st.warning("The following files could not be moved:\n" +
+                           "\n".join(f"• {f}" for f in res["failed"]))
 
     st.markdown("---")
-
 
 # ============================================================================
 # TAB 2: ADD DETECTOR
 # ============================================================================
-# Allows users to register new acoustic detector units.
-# Each detector requires a unique ID and valid GPS coordinates.
-# Registered detectors are stored in session_state and displayed in a table.
 with tab2:
     st.markdown("---")
     st.header("Register a New Detector")
@@ -1503,23 +708,20 @@ with tab2:
 
     with st.form("add_detector_form", clear_on_submit=False):
         name = st.text_input("Detector ID *", placeholder="e.g., Detector-A1")
-        lat  = st.text_input("Latitude *",    placeholder="e.g., -33.9249")
-        lon  = st.text_input("Longitude *",   placeholder="e.g., 18.4241")
+        lat = st.text_input("Latitude *", placeholder="e.g., -33.9249")
+        lon = st.text_input("Longitude *", placeholder="e.g., 18.4241")
 
         submitted_detector = st.form_submit_button("Save Detector", use_container_width=True)
 
         if submitted_detector:
             errors = []
 
-            # Strip whitespace from all inputs
             name = (name or "").strip()
-            lat  = (lat  or "").strip()
-            lon  = (lon  or "").strip()
+            lat = (lat or "").strip()
+            lon = (lon or "").strip()
 
-            # ── Validation ───────────────────────────────────────────────────
             if not name:
                 errors.append("Detector ID is required.")
-
             if not lat:
                 errors.append("Latitude is required.")
             else:
@@ -1541,11 +743,11 @@ with tab2:
                     errors.append("Longitude must be a valid number.")
 
             if not errors:
-                # Check for an exact duplicate (same ID AND same coordinates)
+                # Check for duplicate: same ID, latitude, and longitude
                 duplicate = any(
-                    d["Detector ID"] == name
-                    and float(d["Latitude"])  == float(lat)
-                    and float(d["Longitude"]) == float(lon)
+                    d["Detector ID"] == name and
+                    float(d["Latitude"]) == float(lat) and
+                    float(d["Longitude"]) == float(lon)
                     for d in st.session_state.detectors
                 )
                 if duplicate:
@@ -1557,54 +759,68 @@ with tab2:
                 for e in errors:
                     st.error(e)
             else:
-                # All checks passed — append the new detector to session state
+                # Update in-memory list
                 st.session_state.detectors.append({
                     "Detector ID": name,
-                    "Latitude":    lat,
-                    "Longitude":   lon,
+                    "Latitude": lat,
+                    "Longitude": lon,
                 })
-                st.success("New detector saved successfully!")
+
+                # Persist to database using existing MySQL helper
+                db_detectors = [{
+                    "Detector": name,
+                    "Latitude": lat,
+                    "Longitude": lon,
+                }]
+                db_errors = save_detectors(db_detectors)
+                if db_errors:
+                    for msg in db_errors:
+                        st.error(f"Database error (detector): {msg}")
+                else:
+                    st.success("New detector saved to database successfully.")
+
                 st.rerun()
 
     st.markdown("---")
 
-    # Display all registered detectors in a scrollable table
+    # Show registered detectors
     if st.session_state.detectors:
         st.subheader("Registered Detectors")
         st.dataframe(
             pd.DataFrame(st.session_state.detectors),
             use_container_width=True,
             hide_index=True,
-            height=400,
+            height=400
         )
     else:
         st.info("No detectors registered yet. Add your first detector above!")
 
-
 # ============================================================================
 # TAB 3: ADD SPECIES
 # ============================================================================
-# Allows users to register bat species records with an abbreviation code,
-# Latin (scientific) name, and optional common name.
-# Duplicate entries (same abbreviation + same Latin name) are rejected.
 with tab3:
     st.markdown("---")
     st.header("Register a New Species")
     st.markdown("---")
 
+    # Load species from the database once for this tab
+    db_species_for_tab, db_species_errors = load_species_from_db()
+    if db_species_errors:
+        for msg in db_species_errors:
+            st.error(f"Database error (load species): {msg}")
+
     with st.form("add_species_form", clear_on_submit=False):
-        abbr   = st.text_input("Abbreviation *",           placeholder="e.g., MYLU")
-        latin  = st.text_input("Latin Name *",             placeholder="e.g., Myotis lucifugus")
-        common = st.text_input("Common Name (optional)",   placeholder="e.g., Little brown bat")
+        abbr = st.text_input("Abbreviation *", placeholder="e.g., MYLU")
+        latin = st.text_input("Latin Name *", placeholder="e.g., Myotis lucifugus")
+        common = st.text_input("Common Name (optional)", placeholder="e.g., Little brown bat")
 
         submitted_species = st.form_submit_button("Save Species", use_container_width=True)
 
         if submitted_species:
             errors = []
 
-            # Strip whitespace
-            abbr   = (abbr   or "").strip()
-            latin  = (latin  or "").strip()
+            abbr = (abbr or "").strip()
+            latin = (latin or "").strip()
             common = (common or "").strip()
 
             # ── Validation ───────────────────────────────────────────────────
@@ -1620,11 +836,12 @@ with tab3:
                 errors.append("Latin Name is required.")
 
             if not errors:
-                # Case-insensitive duplicate check on both abbreviation and Latin name
+                # Check duplicates against what is persisted in the database,
+                # not against any manifest-derived placeholders in session state.
                 duplicate = any(
                     s["Abbreviation"].lower() == abbr.lower()
                     and s["Latin Name"].lower() == latin.lower()
-                    for s in st.session_state.species
+                    for s in db_species_for_tab
                 )
                 if duplicate:
                     errors.append(
@@ -1635,41 +852,48 @@ with tab3:
                 for e in errors:
                     st.error(e)
             else:
-                # All checks passed — append the new species record
+                # Update in-memory list
                 st.session_state.species.append({
                     "Abbreviation": abbr,
-                    "Latin Name":   latin,
-                    "Common Name":  common,
+                    "Latin Name": latin,
+                    "Common Name": common,
                 })
-                st.success("New species saved successfully!")
+
+                # Persist to database using existing MySQL helper
+                db_species = [{
+                    "Abbreviation": abbr,
+                    "LatinName": latin,
+                    "CommonName": common,
+                }]
+                db_errors = save_species(db_species)
+                if db_errors:
+                    for msg in db_errors:
+                        st.error(f"Database error (species): {msg}")
+                else:
+                    st.success("New species saved to database successfully.")
+
                 st.rerun()
 
     st.markdown("---")
 
-    # Display all registered species in a scrollable table
-    if st.session_state.species:
-        st.subheader("Registered Species")
-        species_df = pd.DataFrame(st.session_state.species)
-        st.dataframe(
-            species_df,
-            use_container_width=True,
-            hide_index=True,
-            height=400,
-        )
+    # Show registered species (prefer database, not manifest placeholders)
+    st.subheader("Registered Species")
+    if db_species_for_tab:
+        species_df = pd.DataFrame(db_species_for_tab)
+    else:
+        # Show an empty table with expected columns so new species appear
+        species_df = pd.DataFrame(columns=["Abbreviation", "Latin Name", "Common Name"])
 
+    st.dataframe(
+        species_df,
+        use_container_width=True,
+        hide_index=True,
+        height=400
+    )
 
 # ============================================================================
 # TAB 4: ADD TRAINING DATA
 # ============================================================================
-# Allows users to associate .wav audio files with a species and detector.
-# This data is intended to be used as labelled training input for model training.
-#
-# Workflow:
-#   1. Select a species (filterable radio list).
-#   2. Select a detector (filterable radio list).
-#   3. Upload one or more .wav files (max 200 MB each).
-#   4. Click "Save Training Data" — files are stored in memory and an entry
-#      is recorded in session_state.training_entries.
 with tab4:
     st.markdown("---")
     st.header("Add Training Data")
@@ -1677,75 +901,61 @@ with tab4:
 
     col_species, col_location = st.columns(2)
 
-    # ── Species selection column ─────────────────────────────────────────────
     with col_species:
         st.markdown("**Select Species:**")
-
-        # Live-filter the species list as the user types
         species_search = st.text_input(
             "Search species",
             placeholder="Type to filter...",
-            key="species_search",
+            key="species_search"
         )
 
         all_species = [s['Abbreviation'] for s in st.session_state.species]
-        filtered_species = (
-            [sp for sp in all_species if species_search.lower() in sp.lower()]
-            if species_search else all_species
-        )
+        filtered_species = [sp for sp in all_species
+                            if species_search.lower() in sp.lower()] if species_search else all_species
 
         selected_species = st.radio(
             "Species options",
             options=filtered_species if filtered_species else ["No species registered yet"],
             label_visibility="collapsed",
-            key="species_radio",
+            key="species_radio"
         )
 
-    # ── Detector selection column ────────────────────────────────────────────
     with col_location:
         st.markdown("**Select Detector:**")
-
-        # Live-filter the detector list as the user types
         detector_search = st.text_input(
             "Search detector",
             placeholder="Type to filter...",
-            key="detector_search",
+            key="detector_search"
         )
 
         all_detectors = [d["Detector ID"] for d in st.session_state.detectors]
-        filtered_detectors = (
-            [d for d in all_detectors if detector_search.lower() in d.lower()]
-            if detector_search else all_detectors
-        )
+        filtered_detectors = [d for d in all_detectors
+                              if detector_search.lower() in d.lower()] if detector_search else all_detectors
 
         selected_detector = st.radio(
             "Detector options",
             options=filtered_detectors if filtered_detectors else ["No detectors registered yet"],
             label_visibility="collapsed",
-            key="detector_radio",
+            key="detector_radio"
         )
 
     st.markdown("---")
 
-    # ── File upload ──────────────────────────────────────────────────────────
     st.markdown("**Upload Training Audio Files (.wav, max 200MB per file):**")
-
-    # The uploader key is incremented after a successful save to reset the widget
     training_files = st.file_uploader(
         "Drop .wav files here",
         type=['wav'],
         accept_multiple_files=True,
         key=f'training_file_uploader_{st.session_state.training_uploader_key}',
-        label_visibility="collapsed",
+        label_visibility="collapsed"
     )
 
     if training_files:
-        # Warn the user immediately if any file exceeds the size limit
-        oversized_files = [
-            f"{f.name} ({f.size / (1024 * 1024):.1f}MB)"
-            for f in training_files
-            if f.size / (1024 * 1024) > 200
-        ]
+        oversized_files = []
+        for f in training_files:
+            file_size_mb = f.size / (1024 * 1024)
+            if file_size_mb > 200:
+                oversized_files.append(f"{f.name} ({file_size_mb:.1f}MB)")
         if oversized_files:
             st.error(f"The following files exceed 200MB limit: {', '.join(oversized_files)}")
         else:
@@ -1753,12 +963,10 @@ with tab4:
 
     st.markdown("---")
 
-    submitted_training = st.button("Save Training Data", use_container_width=True, type="primary")
+    submitted_training = st.button("Save Training Data", use_container_width=True, type="primary", key="btn_save_training_data")
 
     if submitted_training:
         errors = []
-
-        # ── Validation ───────────────────────────────────────────────────────
         if not st.session_state.species:
             errors.append("No species registered. Please register at least one species first.")
         if not st.session_state.detectors:
@@ -1769,184 +977,236 @@ with tab4:
             oversized = [f for f in training_files if f.size / (1024 * 1024) > 200]
             if oversized:
                 errors.append("Cannot save: Some files exceed the 200MB limit.")
-
         if errors:
             for e in errors:
                 st.error(e)
         else:
-            # Read and store the raw bytes for each uploaded file
             new_file_names = []
             for f in training_files:
                 file_bytes = f.read()
-                st.session_state.training_file_bytes[f.name] = file_bytes  # accumulated store
+                st.session_state.training_file_bytes[f.name] = file_bytes
                 new_file_names.append(f.name)
 
-            # Record the training entry (species + detector + file list)
-            st.session_state.training_entries.append({
-                "Species":   selected_species,
-                "Detector":  selected_detector,
+            entry = {
+                "Species": selected_species,
+                "Detector": selected_detector,
                 "FileCount": len(training_files),
                 "FileNames": new_file_names,
-            })
+            }
+            st.session_state.training_entries.append(entry)
 
-            # Bump the uploader key to clear the file-uploader widget
+            # Persist to Call_Library (save_training_data)
+            db_entries = [
+                {
+                    "Species": entry["Species"],
+                    "Location": entry["Detector"],
+                    "FileCount": entry["FileCount"],
+                    "FileNames": entry["FileNames"],
+                }
+            ]
+            bytes_map = {
+                name: st.session_state.training_file_bytes.get(name)
+                for name in new_file_names
+            }
+            db_errors = save_training_data(db_entries, bytes_map)
+
+            for msg in db_errors:
+                st.error(f"Database error (training data): {msg}")
+
+            if not db_errors:
+                st.success(
+                    f"Training data saved to database: {len(training_files)} file(s) for {selected_species} at detector '{selected_detector}'."
+                )
+
             st.session_state.training_uploader_key += 1
-
-            st.success(
-                f"Training data saved: {len(training_files)} file(s) "
-                f"for {selected_species} at detector '{selected_detector}'."
-            )
             st.rerun()
 
     st.markdown("---")
 
-    # Display all saved training entries
-    if st.session_state.training_entries:
-        st.subheader("Training Data Entries")
-        training_df = pd.DataFrame([
-            {
-                "Species":  entry["Species"],
-                # Support both old "Location" key and new "Detector" key for compatibility
-                "Detector": entry.get("Detector", entry.get("Location", "")),
-                "Files":    entry["FileCount"],
-            }
-            for entry in st.session_state.training_entries
-        ])
+    # Show training data entries from database (aggregated)
+    records_df, records_errors = load_training_records_df()
+    if records_errors:
+        for msg in records_errors:
+            st.error(f"Database error (training records): {msg}")
+    if not records_df.empty:
+        st.subheader("Training Data Entries (from database)")
+        summary_df = (
+            records_df.groupby(["species_abbreviation", "location_name"], as_index=False)["file_count"]
+            .sum()
+            .rename(
+                columns={
+                    "species_abbreviation": "Species",
+                    "location_name": "Detector",
+                    "file_count": "Files",
+                }
+            )
+        )
         st.dataframe(
-            training_df,
+            summary_df,
             use_container_width=True,
             hide_index=True,
             height=400,
         )
     else:
-        st.info("No training data entries yet. Add your first training dataset above!")
-
+        st.info("No training data entries found in the database yet.")
 
 # ============================================================================
 # TAB 5: TRAIN NEW MODEL
 # ============================================================================
-# Allows users to configure and submit a model training job.
-#
-# Workflow:
-#   1. User searches/filters the list of registered detectors.
-#   2. For each detector they want to include, they tick a checkbox.
-#   3. For each selected detector, species checkboxes appear so they can
-#      specify which species the model should be trained on.
-#   4. A summary is shown. The "Train Model" button submits the job.
-#
-# NOTE: The actual training call is not yet implemented — the button currently
-#       shows a success message as a placeholder.
 with tab5:
     st.markdown("---")
     st.header("Train New Model")
     st.markdown("---")
+    
+    # Precompute list of detector IDs (may be empty)
+    all_detector_ids = [d["Detector ID"] for d in st.session_state.detectors]
 
-    # Guard: require at least one detector and one species to be registered
     if not st.session_state.detectors:
         st.info("No detectors registered yet. Please add detectors in the 'Add Detector' tab first.")
     elif not st.session_state.species:
         st.info("No species registered yet. Please add species in the 'Add Species' tab first.")
     else:
-        st.markdown("Select the detectors and species you want to include in the new model training run.")
+        st.markdown("Select one or more detectors and the species you want to include in the new model training run.")
         st.markdown("---")
 
-        # Initialise the selections dict if this is the first visit to this tab
-        if "train_selections" not in st.session_state:
-            st.session_state.train_selections = {}
+        # Load training metadata once to determine which species have training per detector.
+        records_df, records_errors = load_training_records_df()
+        if records_errors:
+            for msg in records_errors:
+                st.error(f"Database error (training records): {msg}")
 
-        all_species_options = [s["Abbreviation"] for s in st.session_state.species]
-        all_detector_ids    = [d["Detector ID"]  for d in st.session_state.detectors]
+        # Build a map of detector -> sorted list of species that have training data
+        if records_df is not None and not records_df.empty:
+            det_species_map: dict[str, list[str]] = (
+                records_df.groupby("location_name")["species_abbreviation"]
+                .apply(lambda s: sorted(set(s.dropna().astype(str))))
+                .to_dict()
+            )
+        else:
+            det_species_map = {}
 
-        # ── Detector search/filter ────────────────────────────────────────────
+        # Session state for multi-detector and multi-species selection
+        if "train_selected_detectors" not in st.session_state:
+            st.session_state.train_selected_detectors = []
+        if "train_selected_species" not in st.session_state:
+            st.session_state.train_selected_species = []
+
+        # Detector search
         detector_search = st.text_input(
             "Search detectors",
             placeholder="Type to filter detectors...",
-            key="train_detector_search",
+            key="train_detector_search"
         )
         st.markdown("---")
 
-        filtered_detectors = (
-            [d for d in all_detector_ids if detector_search.lower() in d.lower()]
-            if detector_search else all_detector_ids
-        )
+        filtered_detectors = [
+            d for d in all_detector_ids
+            if detector_search.lower() in d.lower()
+        ] if detector_search else all_detector_ids
 
         if not filtered_detectors:
             st.info("No detectors match your search.")
-
-        # ── Render one row per (visible) detector ─────────────────────────────
-        for det_id in filtered_detectors:
-            # Ensure a selection record exists for this detector
-            if det_id not in st.session_state.train_selections:
-                st.session_state.train_selections[det_id] = {
-                    "selected":      False,
-                    "species":       [],
-                    "species_search": "",
-                }
-
-            # Checkbox + label in a 2-column layout (thin left col for the checkbox)
-            col_check, col_label = st.columns([0.05, 0.95])
-            with col_check:
-                selected = st.checkbox(
-                    "",
-                    value=st.session_state.train_selections[det_id]["selected"],
-                    key=f"det_check_{det_id}",
-                )
-            with col_label:
-                st.markdown(f"**{det_id}**")
-
-            # Persist the checkbox state
-            st.session_state.train_selections[det_id]["selected"] = selected
-
-            # If this detector is selected, show species checkboxes beneath it
-            if selected:
-                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;*Select species:*")
-                chosen_species = []
-                for sp in all_species_options:
-                    already = sp in st.session_state.train_selections[det_id]["species"]
-                    checked = st.checkbox(
-                        sp,
-                        value=already,
-                        key=f"sp_check_{det_id}_{sp}",
-                    )
-                    if checked:
-                        chosen_species.append(sp)
-                # Update species selection for this detector
-                st.session_state.train_selections[det_id]["species"] = chosen_species
-
-            st.markdown("---")
-
-        # ── Training summary & submit button ─────────────────────────────────
-        # Collect only the detectors that have been ticked
-        active = {
-            det: info
-            for det, info in st.session_state.train_selections.items()
-            if info["selected"]
-        }
-
-        if active:
-            st.markdown("**Selected for training:**")
-            all_valid = True  # becomes False if any selected detector has no species chosen
-
-            for det_id, info in active.items():
-                if info["species"]:
-                    st.markdown(f"- **{det_id}**: {', '.join(info['species'])}")
-                else:
-                    st.markdown(f"- **{det_id}**: No species selected")
-                    all_valid = False
-
-            st.markdown("")
-
-            if st.button("Train Model", use_container_width=True, type="primary"):
-                if not all_valid:
-                    # At least one selected detector has no species — block submission
-                    st.error(
-                        "Please select at least one species for each chosen detector before training."
-                    )
-                else:
-                    # Placeholder success message — replace with actual training API call
-                    st.success(
-                        f"Training job submitted for {len(active)} detector(s): "
-                        + ", ".join(active.keys())
-                    )
+            selected_detectors: list[str] = []
         else:
-            st.info("Select at least one detector above to configure your training run.")
+            # Display all (filtered) detectors from the database as checkboxes
+            st.markdown("**Detectors found in database:**")
+            selected_detectors = []
+            for det_id in filtered_detectors:
+                col_check, col_label = st.columns([0.05, 0.95])
+                with col_check:
+                    checked = st.checkbox(
+                        "",
+                        value=det_id in st.session_state.train_selected_detectors,
+                        key=f"train_det_{det_id}",
+                    )
+                with col_label:
+                    st.markdown(f"**{det_id}**")
+
+                if checked:
+                    selected_detectors.append(det_id)
+
+            st.session_state.train_selected_detectors = selected_detectors
+
+        st.markdown("---")
+
+        # Species selection based on all selected detectors
+        union_species: list[str] = []
+        for det_id in selected_detectors:
+            union_species.extend(det_species_map.get(det_id, []))
+        union_species = sorted(set(union_species))
+
+        if not selected_detectors:
+            st.info("Select at least one detector above to see available species.")
+        elif not union_species:
+            st.warning("No training data in the database for the selected detectors yet.")
+        else:
+            st.markdown("**Species with training data for selected detector(s):**")
+            selected_species: list[str] = []
+            for sp in union_species:
+                checked = st.checkbox(
+                    sp,
+                    value=sp in st.session_state.train_selected_species,
+                    key=f"train_sp_{sp}",
+                )
+                if checked:
+                    selected_species.append(sp)
+            st.session_state.train_selected_species = selected_species
+
+        st.markdown("---")
+
+        # Universal Train Model button at the bottom; greyed out until at least
+        # one detector and one species are selected
+        can_train = bool(
+            st.session_state.train_selected_detectors
+            and st.session_state.train_selected_species
+        )
+        clicked = st.button(
+            "Train Model",
+            use_container_width=True,
+            type="primary",
+            key="btn_train_model_global",
+            disabled=not can_train,
+        )
+
+        if clicked and can_train:
+            with st.spinner("Training model. This may take several minutes..."):
+                try:
+                    # Build per-detector selection structure expected by subset trainer.
+                    # Since the UI currently selects species globally, we apply the same
+                    # chosen species list to each selected detector (intersected with
+                    # what the DB says exists for that detector).
+                    selected_species = list(st.session_state.train_selected_species or [])
+                    train_selections: dict[str, dict] = {}
+                    for det_id in st.session_state.train_selected_detectors:
+                        available = set(det_species_map.get(det_id, []))
+                        chosen_for_det = sorted({sp for sp in selected_species if sp in available})
+                        train_selections[det_id] = {"selected": True, "species": chosen_for_det}
+
+                    # Base model for fine-tuning: model_checkpoints/colab/best_model.pt
+                    # Subset model is saved to model_checkpoints/local/<subset_name>.pt
+                    project_root = Path(__file__).resolve().parent
+                    cfg = Config.from_yaml(project_root / "configs" / "default.yaml")
+                    base_model_path = str(project_root / cfg.model_dir / "colab" / "best_model.pt")
+                    if not Path(base_model_path).exists():
+                        st.error(
+                            f"Base model not found at {base_model_path}. "
+                            "Ensure model_checkpoints/colab/best_model.pt exists for subset training."
+                        )
+                    else:
+                        call_df = get_call_library_data()
+                        job = create_subset_model_from_ui_selection(
+                            conn=None,
+                            train_selections=train_selections,
+                            base_model_path=base_model_path,
+                            call_library_df=call_df,
+                        )
+
+                        st.success(
+                            "Subset model training complete.\n\n"
+                            f"- Model name: `{job.model_name}`\n"
+                            f"- Examples used: {job.num_examples}\n"
+                            f"- Subset model saved to: `{job.output_model_path}`\n"
+                            f"- Metadata: `{job.metadata_path}`"
+                        )
+                except Exception as e:
+                    st.error(f"Training failed: {e}")

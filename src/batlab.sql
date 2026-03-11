@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS `Call_Library` (
   `files` LONGBLOB NOT NULL,
   `latin_name` VARCHAR(45) NOT NULL,
   `Detector_name` VARCHAR(45) NOT NULL,
-  `file_hash` CHAR(64) AS (SHA2(`filename`, 256)) STORED,NOT NULL UNIQUE ,
+  `file_hash` CHAR(64) AS (SHA2(`files`, 256)) STORED NOT NULL UNIQUE,
   PRIMARY KEY (`idTraining`),
   UNIQUE INDEX `idTraining_UNIQUE` (`idTraining` ASC),
   UNIQUE INDEX `file_hash_UNIQUE` (`file_hash` ASC),

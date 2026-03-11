@@ -1,0 +1,448 @@
+/* ============================================================================
+   BatLab - Base styles (light mode, login page)
+   ============================================================================ */
+
+button[title="View fullscreen"] { display: none !important; }
+
+/* Force light mode colors */
+:root, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+}
+
+/* Main app background */
+.main, .stApp {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: #F0F2F6 !important;
+}
+
+/* All text elements */
+p, span, div, h1, h2, h3, h4, h5, h6, label {
+    color: #000000 !important;
+}
+
+/* Exception: Menu items in dropdown menus need white text */
+[data-testid="stHeaderActionElements"] button,
+[data-testid="stHeaderActionElements"] span,
+[data-testid="stHeaderActionElements"] div,
+button[kind="header"],
+header button,
+header span,
+header div[role="menu"] button,
+header div[role="menu"] span,
+[role="menu"] button,
+[role="menu"] span,
+[data-baseweb="menu"] button,
+[data-baseweb="menu"] span,
+.main-menu button,
+.main-menu span {
+    color: #FFFFFF !important;
+}
+
+/* Make header toolbar buttons visible (Deploy button and menu icon) */
+header button,
+header button span,
+header button div,
+[data-testid="stToolbar"] button,
+[data-testid="stToolbar"] button span,
+[data-testid="stToolbar"] button div,
+[data-testid="stToolbar"] svg,
+[data-testid="stDecoration"] + div button,
+[data-testid="stDecoration"] + div button span {
+    color: #FFFFFF !important;
+    fill: #FFFFFF !important;
+}
+
+/* Additional selectors for header buttons */
+button[data-testid*="stHeader"],
+button[class*="viewerBadge"],
+[data-testid="stStatusWidget"] button,
+header [role="button"],
+header [role="button"] span,
+header [role="button"] svg,
+header [role="button"] path {
+    color: #000000 !important;
+    fill: #000000 !important;
+}
+
+/* Make header toolbar buttons visible with clean icons */
+header button,
+[data-testid="stToolbar"] button,
+[data-testid="stDecoration"] + div button {
+    background-color: transparent !important;
+    border: none !important;
+}
+
+/* Specifically target the SVG icon (the three dots) to be black */
+header svg,
+[data-testid="stToolbar"] svg,
+header [role="button"] svg {
+    fill: #FFFFFF !important;
+    color: #FFFFFF !important;
+}
+
+/* Add a subtle circular hover effect */
+header button:hover {
+    background-color: rgba(0, 0, 0, 0.05) !important;
+    border-radius: 50% !important;
+}
+
+/* Input fields */
+input, textarea, [data-baseweb="input"] {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+    border: 1px solid #D3D3D3 !important;
+    border-radius: 0 !important;
+    caret-color: #000000 !important;
+}
+
+/* Fix for Deploy Menu and Dialog text visibility */
+[data-testid="stDialog"] *,
+[role="dialog"] *,
+.st-emotion-cache-12w0qpk * {
+    color: #FFFFFF !important;
+}
+
+/* Ensure sub-headers and descriptions are also white */
+[role="dialog"] h1,
+[role="dialog"] h2,
+[role="dialog"] h3,
+[role="dialog"] p,
+[role="dialog"] li {
+    color: #FFFFFF !important;
+}
+
+/* Style buttons inside the Deploy/Settings dialogs */
+[role="dialog"] button {
+    background-color: #000000 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #FFFFFF !important;
+}
+
+/* Ensure the button text stays white on hover */
+[role="dialog"] button:hover {
+    background-color: #333333 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #B19CD9 !important;
+}
+
+/* Fix for specific button text elements */
+[role="dialog"] button p {
+    color: #FFFFFF !important;
+}
+
+/* Fix for Settings and Dialog visibility */
+[data-testid="stDialog"],
+[role="dialog"],
+[data-baseweb="popover"],
+[data-baseweb="modal"] {
+    background-color: #1E1E1E !important;
+}
+
+/* Ensure text inside the dialog is white so it can be read */
+[role="dialog"] p,
+[role="dialog"] span,
+[role="dialog"] label,
+[role="dialog"] h1,
+[role="dialog"] h2 {
+    color: #FFFFFF !important;
+}
+
+/* Make sure the close button (X) is visible */
+[role="dialog"] button svg {
+    fill: #FFFFFF !important;
+}
+
+/* Ensure input fields show cursor on focus */
+input:focus, textarea:focus, [data-baseweb="input"]:focus {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+    caret-color: #000000 !important;
+    border: 2px solid #B19CD9 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+/* More specific targeting for Streamlit text inputs */
+.stTextInput input:focus,
+[data-testid="stTextInput"] input:focus {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+    caret-color: #000000 !important;
+    border: 2px solid #B19CD9 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+/* Hide the "Press Enter to submit form" tooltip */
+[data-testid="InputInstructions"],
+.stTextInput [data-testid="InputInstructions"],
+div[data-testid="InputInstructions"] {
+    display: none !important;
+}
+
+/* Alternative selectors for the submit form instruction */
+input + div[role="alert"],
+input + div[class*="instructions"],
+[class*="stTextInput"] div[role="alert"] {
+    display: none !important;
+}
+
+/* Make form labels bold and black */
+.stTextInput label,
+[data-testid="stTextInput"] label,
+label {
+    font-weight: bold !important;
+    color: #000000 !important;
+}
+
+/* Bold the Username and Password labels */
+[data-testid="stWidgetLabel"] p {
+    font-weight: 800 !important;
+}
+
+/* Bold widget labels (Username, Password, etc.) */
+[data-testid="stWidgetLabel"] p {
+    font-weight: bold !important;
+}
+
+/* Bold the Login button text */
+[data-testid="stFormSubmitButton"] button p,
+button[kind="formSubmit"] p {
+    font-weight: bold !important;
+}
+
+/* Bold Save Training Data button */
+.stButton > button p {
+    font-weight: bold !important;
+}
+
+/* Make button text bold */
+button[kind="primary"],
+button[kind="formSubmit"],
+.stFormSubmitButton button,
+.stButton button {
+    font-weight: bold !important;
+}
+
+/* Select boxes and dropdowns */
+[data-baseweb="select"], [data-baseweb="popover"] {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+}
+
+/* Buttons - keep transparent with border */
+button {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+    border: 1px solid #D3D3D3 !important;
+}
+
+/* DataFrames and tables */
+[data-testid="stDataFrame"], [data-testid="stTable"] {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+}
+
+/* Cards and containers */
+[data-testid="stVerticalBlock"], [data-testid="stHorizontalBlock"] {
+    background-color: #FFFFFF !important;
+}
+
+/* Forms */
+[data-testid="stForm"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid #E0E0E0 !important;
+}
+
+/* Purple checkboxes */
+[data-testid="stCheckbox"] input[type="checkbox"] {
+    accent-color: #B19CD9 !important;
+}
+[data-baseweb="checkbox"] span {
+    background-color: #B19CD9 !important;
+    border-color: #B19CD9 !important;
+    outline-color: #B19CD9 !important;
+}
+[data-baseweb="checkbox"] span:hover {
+    background-color: #9b7fc7 !important;
+    border-color: #9b7fc7 !important;
+}
+[role="checkbox"][aria-checked="true"] {
+    background-color: #B19CD9 !important;
+    border-color: #B19CD9 !important;
+}
+[role="checkbox"][aria-checked="true"] span {
+    background-color: #B19CD9 !important;
+    border-color: #B19CD9 !important;
+}
+
+/* Tabs */
+[data-baseweb="tab-list"] {
+    background-color: #F0F2F6 !important;
+}
+
+[data-baseweb="tab"] {
+    color: #000000 !important;
+}
+
+/* Expander */
+[data-testid="stExpander"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid #E0E0E0 !important;
+}
+
+/* Info/warning/error boxes */
+[data-testid="stAlert"] {
+    background-color: #F0F2F6 !important;
+    color: #000000 !important;
+}
+
+/* Metrics */
+[data-testid="stMetric"] {
+    background-color: #F0F2F6 !important;
+    color: #000000 !important;
+}
+
+/* Headers remain black */
+h1, h2, h3, h4, h5, h6 {
+    color: #000000 !important;
+}
+
+/* Gray text for subtitles */
+.gray-text {
+    color: #666666 !important;
+}
+
+/* Download buttons - match app button style */
+[data-testid="stDownloadButton"] button,
+.stDownloadButton button {
+    background-color: transparent !important;
+    color: #000000 !important;
+    border: 1px solid rgba(0, 0, 0, 0.2) !important;
+}
+
+[data-testid="stDownloadButton"] button:hover,
+.stDownloadButton button:hover {
+    background-color: transparent !important;
+    color: #B19CD9 !important;
+    border: 2px solid #B19CD9 !important;
+}
+
+/* Completely hide the hamburger menu and header toolbar */
+header[data-testid="stHeader"] {
+    display: none !important;
+}
+
+/* Remove the top padding to pull the content to the top */
+[data-testid="stAppViewContainer"] {
+    padding-top: 0rem !important;
+}
+
+/* ============================================================================
+   Hide dataframe toolbar buttons
+   ============================================================================ */
+
+/* Hide "Show/hide columns" button */
+button[title="Show/hide columns"],
+button[aria-label="Show/hide columns"],
+div[data-testid="stDataFrame"] button[title="Show/hide columns"],
+div[data-testid="stDataFrame"] button[aria-label="Show/hide columns"],
+div[data-testid="stDataEditor"] button[title="Show/hide columns"],
+div[data-testid="stDataEditor"] button[aria-label="Show/hide columns"],
+div[data-testid="stElementToolbar"] button[title*="Show/hide"],
+div[data-testid="stElementToolbar"] button[aria-label*="Show/hide"],
+div[role="dialog"][aria-label="Show/hide columns"],
+div[role="menu"][aria-label="Show/hide columns"] {
+    display: none !important;
+}
+
+/* Hide "Download as CSV" button */
+button[title="Download as CSV"],
+button[aria-label="Download as CSV"],
+div[data-testid="stDataFrame"] button[title="Download as CSV"],
+div[data-testid="stDataFrame"] button[aria-label="Download as CSV"],
+div[data-testid="stElementToolbar"] button[title*="Download"],
+div[data-testid="stElementToolbar"] button[aria-label*="Download"],
+div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[title*="Download"],
+div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[aria-label*="Download"],
+div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[title*="download"],
+div[data-testid="stDataFrame"] [data-testid="stElementToolbar"] button[aria-label*="download"] {
+    display: none !important;
+}
+
+/* ============================================================================
+   Button and tab styling (purple accent)
+   ============================================================================ */
+
+button[kind="primary"],
+button[kind="formSubmit"],
+.stFormSubmitButton button,
+.stButton button {
+    background-color: transparent !important;
+    color: #000000 !important;
+    border: 1px solid rgba(0, 0, 0, 0.2) !important;
+}
+
+button[kind="primary"]:hover,
+button[kind="formSubmit"]:hover,
+.stFormSubmitButton button:hover,
+.stButton button:hover {
+    background-color: transparent !important;
+    color: #000000 !important;
+    border: 2px solid #B19CD9 !important;
+}
+
+button[kind="primary"]:focus,
+button[kind="formSubmit"]:focus,
+.stFormSubmitButton button:focus,
+.stButton button:focus {
+    border: 2px solid #B19CD9 !important;
+    box-shadow: none !important;
+}
+
+button[kind="primary"]:active,
+button[kind="formSubmit"]:active,
+.stFormSubmitButton button:active,
+.stButton button:active {
+    border: 2px solid #B19CD9 !important;
+}
+
+/* Make ALL tabs use purple */
+button[data-baseweb="tab"][aria-selected="true"],
+.stTabs [data-baseweb="tab"][aria-selected="true"],
+div[data-baseweb="tab-list"] button[aria-selected="true"] {
+    border-bottom-color: #B19CD9 !important;
+    color: #B19CD9 !important;
+}
+
+.stTabs [data-baseweb="tab-highlight"] {
+    background-color: #B19CD9 !important;
+}
+
+.stTabs button[aria-selected="true"] p {
+    color: #B19CD9 !important;
+}
+
+/* Tab hover color */
+.stTabs button[data-baseweb="tab"]:hover,
+button[data-baseweb="tab"]:hover,
+div[data-baseweb="tab-list"] button:hover {
+    color: #B19CD9 !important;
+}
+
+.stTabs button[data-baseweb="tab"]:hover p,
+button[data-baseweb="tab"]:hover p,
+div[data-baseweb="tab-list"] button:hover p {
+    color: #B19CD9 !important;
+}
+
+.stTabs button:hover *,
+button[data-baseweb="tab"]:hover * {
+    color: #B19CD9 !important;
+}
