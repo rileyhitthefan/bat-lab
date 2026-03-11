@@ -45,12 +45,12 @@ bat-lab/
 │   │   │   ├── train.py               # CLI: build manifest + full train
 │   │   │   └── predict.py             # Single-file inference
 │   │   └── training/
-│   │       ├── inference.py           # load_best, predict_file
+│   │       ├── inference.py            # load_best, predict_file
 │   │       ├── calibration.py          # Temperature scaling
 │   │       ├── trainer.py              # Training loop
 │   │       └── subset_model_trainer.py # Fine-tune subset from UI (colab → local)
 │   └── ui/
-│       ├── styles.css                 # Base (light) styles
+│       ├── styles.css                  # Base (light) styles
 │       └── theme_dark.css              # Dark theme overrides
 ├── cache_mels/                         # Cached mel spectrograms (optional, gitignored)
 ├── cache_numfeats/                     # Cached numeric features (optional, gitignored)
