@@ -14,8 +14,6 @@ Detect and classify bat echolocation calls and identify behavioral sequences.
 - **Train New Model** — Fine-tune from the Colab base model on selected detectors and species. Subset models are saved under `model_checkpoints/local/<subset_name>/` and appear in the Classify model dropdown.
 
 ## Layout
-
-File for User Manual: https://drive.google.com/drive/folders/10A_5EJbl0U-VE_eGgLaygLFI4HIdAO14?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto 
 ```
 bat-lab/
 ├── app.py                              # Streamlit UI
