@@ -15,8 +15,8 @@ epochs: 100
 model_dir: model_checkpoints
 cache_dir: cache_mels
 numfeat_cache_dir: cache_numfeats
-manifest_csv: model_checkpoints/data_manifest.csv
-thresholds_yaml: model_checkpoints/thresholds.yaml
+manifest_csv: model_checkpoints/colab/data_manifest.csv
+thresholds_yaml: model_checkpoints/colab/thresholds.yaml
 default_min_conf: 0.7
 
 seed: 1337

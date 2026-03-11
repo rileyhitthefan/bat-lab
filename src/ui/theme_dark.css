@@ -43,7 +43,32 @@ body {
     background-color: #000000 !important;
 }
 
+/* High-specificity dark overrides so they win over base styles.css */
+[data-testid="stAppViewContainer"] input,
+[data-testid="stAppViewContainer"] textarea,
+[data-testid="stAppViewContainer"] [data-baseweb="input"],
+[data-testid="stAppViewContainer"] [data-baseweb="select"],
+[data-testid="stAppViewContainer"] [data-baseweb="select"] > div,
+.main input,
+.main textarea,
+.main [data-baseweb="input"],
+.main [data-baseweb="select"] > div {
+    background-color: #1A1A1A !important;
+    color: #FFFFFF !important;
+    border-color: #555555 !important;
+    caret-color: #FFFFFF !important;
+}
+
 div, section, [data-testid="stVerticalBlock"], [data-testid="stHorizontalBlock"] {
+    background-color: transparent !important;
+}
+
+/* Prevent Streamlit element wrappers from showing white (e.g. empty area below Model dropdown) */
+[data-testid="stSelectbox"] + div,
+[data-testid="stWidgetLabel"] + div,
+.stSelectbox + div,
+[data-testid="stVerticalBlock"] > div,
+[data-testid="stHorizontalBlock"] > div {
     background-color: transparent !important;
 }
 
@@ -101,6 +126,108 @@ input, textarea, [data-baseweb="input"] {
     color: #FFFFFF !important;
     border: 1px solid #444444 !important;
     caret-color: #FFFFFF !important;
+}
+
+/* Select/dropdown (Model selector) - dark background and visible border */
+[data-testid="stSelectbox"] div[data-baseweb="select"],
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-baseweb="select"] > div:first-child,
+div[data-baseweb="select"] {
+    background-color: #1A1A1A !important;
+    color: #FFFFFF !important;
+    border: 1px solid #555555 !important;
+    border-radius: 4px !important;
+}
+
+[data-testid="stSelectbox"] input,
+[data-testid="stSelectbox"] [contenteditable],
+[data-baseweb="select"] input {
+    background-color: #1A1A1A !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    caret-color: #FFFFFF !important;
+}
+
+/* Dropdown chevron and icons - visible on dark */
+[data-testid="stSelectbox"] svg,
+[data-baseweb="select"] svg,
+[data-testid="stSelectbox"] path,
+[data-baseweb="select"] path {
+    fill: #CCCCCC !important;
+    color: #CCCCCC !important;
+}
+
+[data-testid="stSelectbox"]:focus-within svg,
+[data-baseweb="select"]:focus-within svg {
+    fill: #FFFFFF !important;
+}
+
+/* Focus state for inputs and select - purple accent, not reddish */
+input:focus, textarea:focus,
+[data-baseweb="input"]:focus,
+[data-testid="stSelectbox"]:focus-within,
+[data-baseweb="select"]:focus-within {
+    background-color: #1A1A1A !important;
+    color: #FFFFFF !important;
+    border: 2px solid #B19CD9 !important;
+    box-shadow: 0 0 0 1px #B19CD9 !important;
+    outline: none !important;
+}
+
+/* Widget label and help icon - visible on dark */
+[data-testid="stWidgetLabel"] p,
+[data-testid="stWidgetLabel"] label,
+.stSelectbox label,
+[data-testid="stSelectbox"] label {
+    color: #FFFFFF !important;
+}
+
+[data-testid="stWidgetLabel"] svg,
+[data-testid="stWidgetLabel"] path,
+button[data-testid="stWidgetLabel"] svg,
+[aria-label="Help"] svg {
+    fill: #AAAAAA !important;
+    color: #AAAAAA !important;
+}
+
+[data-testid="stWidgetLabel"] svg:hover,
+[aria-label="Help"]:hover svg {
+    fill: #B19CD9 !important;
+}
+
+/* Text input wrapper (e.g. source folder path) - dark */
+[data-testid="stTextInput"] div,
+[data-testid="stTextInput"] input {
+    background-color: #1A1A1A !important;
+    color: #FFFFFF !important;
+    border: 1px solid #555555 !important;
+}
+
+[data-testid="stTextInput"] input:focus {
+    border: 2px solid #B19CD9 !important;
+    box-shadow: none !important;
+}
+
+/* Dropdown menu (open list) - dark background */
+[data-baseweb="popover"],
+[role="listbox"],
+[data-baseweb="menu"] {
+    background-color: #1E1E1E !important;
+    color: #FFFFFF !important;
+    border: 1px solid #555555 !important;
+}
+
+[data-baseweb="popover"] li,
+[data-baseweb="popover"] [role="option"],
+[role="listbox"] [role="option"] {
+    background-color: #1E1E1E !important;
+    color: #FFFFFF !important;
+}
+
+[data-baseweb="popover"] li:hover,
+[data-baseweb="popover"] [role="option"]:hover {
+    background-color: #2A2A2A !important;
+    color: #FFFFFF !important;
 }
 
 /* Forms */

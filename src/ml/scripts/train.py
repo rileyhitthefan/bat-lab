@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -132,27 +133,30 @@ def build_loaders(
     val_ds = BatDataset(val_df, ctx)
     test_ds = BatDataset(test_df, ctx)
 
+    # On Windows, num_workers > 0 often causes OSError (invalid handle) when spawning.
+    num_workers = 0 if sys.platform == "win32" else cfg.num_workers
+
     # Create data loaders
     loaders = {
         "train": DataLoader(
             train_ds,
             batch_size=cfg.batch_size,
             shuffle=True,
-            num_workers=cfg.num_workers,
+            num_workers=num_workers,
             pin_memory=True,
         ),
         "val": DataLoader(
             val_ds,
             batch_size=cfg.batch_size,
             shuffle=False,
-            num_workers=cfg.num_workers,
+            num_workers=num_workers,
             pin_memory=True,
         ),
         "test": DataLoader(
             test_ds,
             batch_size=cfg.batch_size,
             shuffle=False,
-            num_workers=cfg.num_workers,
+            num_workers=num_workers,
             pin_memory=True,
         ),
     }

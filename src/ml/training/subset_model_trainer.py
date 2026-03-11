@@ -7,13 +7,25 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+
+from src.ml.config import Config, ensure_dirs
+from src.ml.scripts.train import build_loaders
+from src.ml.training.inference import load_best
+from src.ml.training.calibration import calibrate_temperature
+from src.ml.training.trainer import train_model
+from src.db.connection import get_call_library_data
+
 
 # -----------------------------------------------------------------------------
 # CONFIG
 # -----------------------------------------------------------------------------
 
-BASE_DIR = Path(__file__).resolve().parents[1]   # ml/
-MODELS_DIR = BASE_DIR / "models" / "custom"
+BASE_DIR = Path(__file__).resolve().parents[3] / "model_checkpoints" / "local"
+MODELS_DIR = BASE_DIR
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -73,51 +85,36 @@ def normalize_train_selections(train_selections: Dict[str, Dict[str, Any]]) -> D
 
 def fetch_subset_training_examples(conn, detector_species_map: Dict[str, List[str]]) -> List[TrainingExample]:
     """
-    Pull just the training examples needed for the custom model.
+    Pull just the training examples needed for the custom model, using the
+    same Call_Library materialisation logic as src.db.connection.get_call_library_data.
 
-    ASSUMED TABLE SHAPE:
-        training_files(
-            detector_id VARCHAR,
-            species_code VARCHAR,
-            file_path VARCHAR,
-            is_verified BOOLEAN
+    Ignores the `conn` argument (kept for backward compatibility) and builds
+    examples from the Call_Library blobs materialised to disk.
+    """
+    call_df = get_call_library_data()
+    if call_df is None or getattr(call_df, "empty", True):
+        return []
+
+    det_allow = set(detector_species_map.keys())
+    examples: List[TrainingExample] = []
+    for row in call_df.itertuples(index=False):
+        det = getattr(row, "location")
+        sp = getattr(row, "bat")
+        fp = getattr(row, "file")
+        if det not in det_allow:
+            continue
+        allowed_species = detector_species_map.get(det) or []
+        if sp not in allowed_species:
+            continue
+        examples.append(
+            TrainingExample(
+                detector_id=str(det),
+                species_code=str(sp),
+                file_path=str(fp),
+            )
         )
 
-    Adjust the SQL if your schema uses different table/column names.
-    """
-    rows: List[TrainingExample] = []
-    cursor = conn.cursor(dictionary=True)
-
-    query = """
-        SELECT detector_id, species_code, file_path
-        FROM training_files
-        WHERE detector_id = %s
-          AND species_code IN ({placeholders})
-          AND is_verified = 1
-    """
-
-    for detector_id, species_codes in detector_species_map.items():
-        if not species_codes:
-            continue
-
-        placeholders = ",".join(["%s"] * len(species_codes))
-        final_query = query.format(placeholders=placeholders)
-        params = [detector_id, *species_codes]
-
-        cursor.execute(final_query, params)
-        result = cursor.fetchall()
-
-        for row in result:
-            rows.append(
-                TrainingExample(
-                    detector_id=row["detector_id"],
-                    species_code=row["species_code"],
-                    file_path=row["file_path"],
-                )
-            )
-
-    cursor.close()
-    return rows
+    return examples
 
 
 # -----------------------------------------------------------------------------
@@ -160,32 +157,144 @@ def fine_tune_subset_model(
     output_model_path: str,
 ) -> Dict[str, Any]:
     """
-    Replace this function body with your actual PyTorch training code.
+    Train a subset model using the existing BatLab training pipeline.
 
-    Intended flow:
-      1. Load your base model checkpoint.
-      2. Replace / resize final classifier layer to len(label_map).
-      3. Freeze early layers if using transfer learning.
-      4. Train only upper layers (or partially unfreeze later).
-      5. Save subset checkpoint separately.
-
-    For now this creates a placeholder JSON artifact so the pipeline works end-to-end.
+    This mirrors `scripts/train.py::train_from_manifest_df` but runs on an
+    in-memory list of `TrainingExample` for a subset of detectors/species.
     """
-    artifact = {
-        "status": "placeholder_saved",
+    project_root = Path(__file__).resolve().parents[3]
+
+    # ------------------------------------------------------------------
+    # 1) Build manifest DataFrame from examples
+    # ------------------------------------------------------------------
+    records = []
+    for ex in examples:
+        records.append(
+            {
+                "filepath": ex.file_path,
+                "label": ex.species_code,
+                "location": ex.detector_id,
+            }
+        )
+
+    df = pd.DataFrame(records, columns=["filepath", "label", "location"])
+    if df.empty:
+        raise ValueError("No training examples provided to fine_tune_subset_model.")
+
+    # ------------------------------------------------------------------
+    # 2) Load config and ensure directories
+    # ------------------------------------------------------------------
+    config_path = project_root / "configs" / "default.yaml"
+    cfg = Config.from_yaml(config_path)
+    ensure_dirs(cfg, project_root)
+
+    # ------------------------------------------------------------------
+    # 3) Set random seed (reuse cfg.seed)
+    # ------------------------------------------------------------------
+    seed_val = cfg.seed
+    torch.manual_seed(seed_val)
+    np.random.seed(seed_val)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed_val)
+
+    # ------------------------------------------------------------------
+    # 4) Build loaders/metadata for this subset
+    # ------------------------------------------------------------------
+    data_root = ""  # filepaths in df are already absolute
+    loaders, meta = build_loaders(
+        df,
+        data_root,
+        cfg,
+        project_root,
+        min_samples=3,
+        test_size=0.3,
+        val_size=0.5,
+        seed=seed_val,
+    )
+
+    # ------------------------------------------------------------------
+    # 5) Load base model checkpoint and adapt classifier for subset
+    # ------------------------------------------------------------------
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    base_model, _base_meta = load_best(base_model_path, device)
+
+    # Resize final classifier layer to the subset number of classes, keeping
+    # prior layers (feature extractor) intact for transfer learning.
+    if not hasattr(base_model, "fc") or not isinstance(base_model.fc, nn.Sequential):
+        raise ValueError("Base model does not have expected 'fc' Sequential head.")
+
+    last_layer = base_model.fc[-1]
+    if not isinstance(last_layer, nn.Linear):
+        raise ValueError("Last layer of base model 'fc' head is not nn.Linear.")
+
+    in_features = last_layer.in_features
+    num_subset_classes = len(meta["species"])
+    base_model.fc[-1] = nn.Linear(in_features, num_subset_classes, bias=True).to(device)
+
+    # Optionally freeze earlier layers to train only classifier head.
+    for name, param in base_model.named_parameters():
+        # Simple heuristic: only layers inside "fc" are trainable
+        param.requires_grad = name.startswith("fc.")
+
+    model = base_model
+
+    # Train and get best checkpoint under MODELS_DIR (local subset directory)
+    model_dir = MODELS_DIR
+    model_dir.mkdir(parents=True, exist_ok=True)
+    result = train_model(
+        model=model,
+        loaders=loaders,
+        device=device,
+        lr=cfg.lr,
+        epochs=cfg.epochs,
+        model_dir=str(model_dir),
+        meta=meta,
+    )
+
+    # ------------------------------------------------------------------
+    # 6) Evaluate + calibrate (temperature scaling), then save calibrated
+    #    subset checkpoint to output_model_path (model_checkpoints/local/...).
+    #    Use the in-memory model/meta to avoid shape mismatches when
+    #    reloading with a different number of locations.
+    # ------------------------------------------------------------------
+    from src.ml.scripts.train import evaluate_model  # avoid circular import at top
+
+    model.eval()
+    test_acc = float(evaluate_model(model, loaders["test"], device))
+    temperature = float(calibrate_temperature(model, loaders["val"], device))
+
+    checkpoint = {
+        "model_state": model.state_dict(),
+        "meta": meta,
+        "temperature": temperature,
+    }
+    output_model_path = str(output_model_path)
+    Path(output_model_path).parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint, output_model_path)
+
+    # Also write feature_stats.json in same folder (model_checkpoints/local/<model_name>/feature_stats.json)
+    try:
+        subset_dir = Path(output_model_path).parent
+        stats_path = subset_dir / "feature_stats.json"
+        feat_mean = meta.get("feat_mean")
+        feat_std = meta.get("feat_std")
+        if feat_mean is not None and feat_std is not None:
+            stats_payload = {"mean": feat_mean, "std": feat_std}
+            with open(stats_path, "w", encoding="utf-8") as f:
+                json.dump(stats_payload, f)
+    except Exception:
+        pass
+
+    return {
         "base_model_path": base_model_path,
         "output_model_path": output_model_path,
         "num_examples": len(examples),
         "num_classes": len(label_map),
         "classes": label_map,
+        "test_acc": test_acc,
+        "temperature": temperature,
+        "history": result.history,
     }
-
-    # Temporary placeholder output so your UI/db integration can be tested first
-    with open(output_model_path, "w", encoding="utf-8") as f:
-        json.dump(artifact, f, indent=2)
-
-    return artifact
-
 
 # -----------------------------------------------------------------------------
 # MODEL REGISTRY / METADATA
@@ -205,7 +314,8 @@ def save_training_metadata(
     base_model_path: str,
     output_model_path: str,
 ) -> str:
-    metadata_path = MODELS_DIR / f"{model_name}_metadata.json"
+    # Keep metadata in same folder as the subset .pt (model_checkpoints/local/<model_name>/)
+    metadata_path = Path(output_model_path).parent / f"{model_name}_metadata.json"
 
     payload = {
         "model_name": model_name,
@@ -229,19 +339,55 @@ def save_training_metadata(
 # -----------------------------------------------------------------------------
 
 def create_subset_model_from_ui_selection(
-    conn,
     train_selections: Dict[str, Dict[str, Any]],
     base_model_path: str,
+    conn=None,
+    call_library_df=None,
 ) -> SubsetTrainingJob:
     """
     Main function your Streamlit UI should call.
+
+    Data sources: pass `call_library_df`
+        with columns `file`, `bat`, `location` (as returned by
+        `src.db.connection.get_call_library_data()`), and you may pass `conn=None`
     """
     detector_species_map = normalize_train_selections(train_selections)
 
     if not detector_species_map:
         raise ValueError("No detectors/species were selected for training.")
 
-    examples = fetch_subset_training_examples(conn, detector_species_map)
+    if call_library_df is not None:
+        required_cols = {"file", "bat", "location"}
+        if getattr(call_library_df, "empty", True):
+            raise ValueError("No training calls found in the database.")
+        missing_cols = required_cols.difference(set(getattr(call_library_df, "columns", [])))
+        if missing_cols:
+            raise ValueError(
+                f"Call library data is missing required columns: {sorted(missing_cols)}"
+            )
+
+        det_allow = set(detector_species_map.keys())
+        examples: List[TrainingExample] = []
+        for row in call_library_df.itertuples(index=False):
+            det = getattr(row, "location")
+            sp = getattr(row, "bat")
+            fp = getattr(row, "file")
+            if det not in det_allow:
+                continue
+            allowed_species = detector_species_map.get(det) or []
+            if sp not in allowed_species:
+                continue
+            examples.append(
+                TrainingExample(
+                    detector_id=str(det),
+                    species_code=str(sp),
+                    file_path=str(fp),
+                )
+            )
+    else:
+        if conn is None:
+            raise ValueError("No training data source provided (expected call_library_df or conn).")
+        examples = fetch_subset_training_examples(conn, detector_species_map)
 
     ok, message = validate_examples(examples)
     if not ok:
@@ -250,7 +396,10 @@ def create_subset_model_from_ui_selection(
     label_map = build_label_map(examples)
     model_name = make_model_name(detector_species_map)
 
-    output_model_path = MODELS_DIR / f"{model_name}.json"   # change to .pt when real training is added
+    # Save under model_checkpoints/local/<model_name>/<model_name>.pt
+    subset_dir = MODELS_DIR / model_name
+    subset_dir.mkdir(parents=True, exist_ok=True)
+    output_model_path = subset_dir / f"{model_name}.pt"
 
     fine_tune_subset_model(
         examples=examples,

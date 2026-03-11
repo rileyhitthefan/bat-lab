@@ -14,7 +14,36 @@ from src.db.connection import (
     load_species_from_db,
     load_training_records_df,
 )
-from src.ml.scripts.train import train_from_manifest_df
+from src.ml.training.subset_model_trainer import create_subset_model_from_ui_selection
+
+# ============================================================================
+# MODEL DISCOVERY (for Classify tab dropdown)
+# ============================================================================
+
+def get_available_models() -> list[tuple[str, str]]:
+    """
+    Return list of (display_label, model_path_str) for the Classify tab:
+    - Colab (base) model at model_checkpoints/colab/best_model.pt
+    - All subset models under model_checkpoints/local/<name>/<name>.pt
+    """
+    project_root = Path(__file__).resolve().parent
+    cfg = Config.from_yaml(project_root / "configs" / "default.yaml")
+    base = project_root / cfg.model_dir
+    options: list[tuple[str, str]] = []
+
+    colab_pt = base / "colab" / "best_model.pt"
+    if colab_pt.exists():
+        options.append(("Colab (base model)", str(colab_pt)))
+
+    local_dir = base / "local"
+    if local_dir.is_dir():
+        for subdir in sorted(local_dir.iterdir()):
+            if subdir.is_dir():
+                subset_pt = subdir / f"{subdir.name}.pt"
+                if subset_pt.exists():
+                    options.append((f"Subset: {subdir.name}", str(subset_pt)))
+
+    return options
 
 # ============================================================================
 # PAGE CONFIGURATION
@@ -168,9 +197,14 @@ def _file_like_from_disk(source_folder: str, filename: str):
     return FileLike(filename, path)
 
 
-def process_audio_files(source_folder: str, wav_filenames: list[str]):
+def process_audio_files(
+    source_folder: str,
+    wav_filenames: list[str],
+    model_path: str | None = None,
+):
     """
     Classify .wav files from the given folder using the ML model (classify_app).
+    model_path: optional path to .pt checkpoint; if None, classify_app uses its default.
     Returns (known_df, unknown_df) with columns Filename, Species Prediction, Confidence Level.
     """
     file_objects = []
@@ -186,7 +220,7 @@ def process_audio_files(source_folder: str, wav_filenames: list[str]):
         else:
             missing_or_skipped.append({"Filename": fn})
 
-    known_df, unknown_df = classify_uploaded_files(file_objects)
+    known_df, unknown_df = classify_uploaded_files(file_objects, model_path=model_path)
 
     if missing_or_skipped:
         unknown_df = pd.concat(
@@ -344,8 +378,29 @@ with tab1:
 
     st.markdown("---")
 
-    # ── STEP 1: Source folder path ───────────────────────────────────────────
-    st.markdown("### Step 1 — Enter the source folder path")
+    # ── STEP 1: Model Selector ─────────────────────────────────────────────────────
+    st.markdown("### Step 1 — Select a Model")
+    model_options = get_available_models()
+    if model_options:
+        labels = [o[0] for o in model_options]
+        label_to_path = {o[0]: o[1] for o in model_options}
+        selected_label = st.selectbox(
+            "Model",
+            labels,
+            key="classify_model_select",
+            help="Colab (base) or a subset model trained in the Train New Model tab.",
+        )
+        selected_model_path = label_to_path.get(selected_label)
+    else:
+        selected_model_path = None
+        st.warning(
+            "No models found. Add model_checkpoints/colab/best_model.pt or train a subset model in the Train New Model tab."
+        )
+
+    st.markdown("---")
+    
+    # ── STEP 2: Source folder path ───────────────────────────────────────────
+    st.markdown("### Step 2 — Enter the source folder path")
 
     import os
     source_input = st.text_input(
@@ -391,8 +446,8 @@ with tab1:
 
     st.markdown("---")
 
-    # ── STEP 2: Classify ─────────────────────────────────────────────────────
-    st.markdown("### Step 2 — Classify")
+    # ── STEP 3: Classify ─────────────────────────────────────────────────────
+    st.markdown("### Step 3 — Classify")
 
     classify_disabled = not bool(st.session_state.source_folder and st.session_state.uploaded_files)
 
@@ -408,6 +463,7 @@ with tab1:
                 known_df, unknown_df = process_audio_files(
                     st.session_state.source_folder,
                     st.session_state.uploaded_files,
+                    model_path=selected_model_path,
                 )
 
                 if not known_df.empty:
@@ -1097,33 +1153,43 @@ with tab5:
 
         if clicked and can_train:
             with st.spinner("Training model. This may take several minutes..."):
-                # Load all available training calls from the database
-                call_df = get_call_library_data()
-                if call_df is None or call_df.empty:
-                    st.error("No training calls found in the database.")
-                else:
-                    # Map DB columns to manifest schema expected by the training pipeline
-                    df = call_df.rename(
-                        columns={
-                            "file": "filepath",
-                            "bat": "label",
-                            "location": "location",
-                        }
-                    )
+                try:
+                    # Build per-detector selection structure expected by subset trainer.
+                    # Since the UI currently selects species globally, we apply the same
+                    # chosen species list to each selected detector (intersected with
+                    # what the DB says exists for that detector).
+                    selected_species = list(st.session_state.train_selected_species or [])
+                    train_selections: dict[str, dict] = {}
+                    for det_id in st.session_state.train_selected_detectors:
+                        available = set(det_species_map.get(det_id, []))
+                        chosen_for_det = sorted({sp for sp in selected_species if sp in available})
+                        train_selections[det_id] = {"selected": True, "species": chosen_for_det}
 
-                    # Filter rows to match the selected detectors and chosen species
-                    mask = df["location"].isin(st.session_state.train_selected_detectors) & (
-                        df["label"].isin(st.session_state.train_selected_species)
-                    )
-                    filtered = df[mask].copy()
-
-                    if filtered.empty:
+                    # Base model for fine-tuning: model_checkpoints/colab/best_model.pt
+                    # Subset model is saved to model_checkpoints/local/<subset_name>.pt
+                    project_root = Path(__file__).resolve().parent
+                    cfg = Config.from_yaml(project_root / "configs" / "default.yaml")
+                    base_model_path = str(project_root / cfg.model_dir / "colab" / "best_model.pt")
+                    if not Path(base_model_path).exists():
                         st.error(
-                            "No matching training files found in the database for the selected detectors and species."
+                            f"Base model not found at {base_model_path}. "
+                            "Ensure model_checkpoints/colab/best_model.pt exists for subset training."
                         )
                     else:
-                        result = train_from_manifest_df(filtered)
-                        st.success(
-                            f"Training complete. Test accuracy: {result['test_acc']:.4f}. "
-                            f"Model saved to {result['best_path']}."
+                        call_df = get_call_library_data()
+                        job = create_subset_model_from_ui_selection(
+                            conn=None,
+                            train_selections=train_selections,
+                            base_model_path=base_model_path,
+                            call_library_df=call_df,
                         )
+
+                        st.success(
+                            "Subset model training complete.\n\n"
+                            f"- Model name: `{job.model_name}`\n"
+                            f"- Examples used: {job.num_examples}\n"
+                            f"- Subset model saved to: `{job.output_model_path}`\n"
+                            f"- Metadata: `{job.metadata_path}`"
+                        )
+                except Exception as e:
+                    st.error(f"Training failed: {e}")
