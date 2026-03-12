@@ -149,9 +149,22 @@ def load_best(model_path: str, device: str):
                 meta.setdefault("feat_mean", mean.tolist())
                 meta.setdefault("feat_std", std.tolist())
 
+            # Determine n_locations in a way that respects the checkpoint
+            # weights. Subset fine‑tuned models reuse the base model's
+            # location embedding (so `loc_embed.weight` keeps its original
+            # size), but `meta["locations"]` may only list the subset of
+            # locations that were present in the training data. If we size
+            # the embedding using only `len(meta["locations"])`, we can get
+            # a size mismatch when loading `loc_embed.weight`.
+            loc_embed_weight = state_dict.get("loc_embed.weight")
+            if loc_embed_weight is not None:
+                n_locations = int(loc_embed_weight.shape[0])
+            else:
+                n_locations = len(meta["locations"])
+
             model = BatClassifier(
                 n_classes=len(meta["species"]),
-                n_locations=len(meta["locations"]),
+                n_locations=n_locations,
                 num_feat_dim=meta["numeric_feat_dim"],
             ).to(device)
             model.load_state_dict(state_dict)
