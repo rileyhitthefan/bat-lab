@@ -120,6 +120,45 @@ button[data-baseweb="tab"]:focus {
     color: #FFFFFF !important;
 }
 
+/* Code blocks (e.g. training output) */
+div[data-testid="stCodeBlock"],
+div[data-testid="stCode"],
+.stCodeBlock,
+.stCode {
+    background-color: #000000 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #333333 !important;
+}
+
+div[data-testid="stCodeBlock"] pre,
+div[data-testid="stCode"] pre,
+.stCodeBlock pre,
+.stCode pre,
+div[data-testid="stCodeBlock"] code,
+div[data-testid="stCode"] code,
+.stCodeBlock code,
+.stCode code {
+    background-color: #000000 !important;
+    color: #FFFFFF !important;
+}
+
+div[data-testid="stCodeBlock"] *,
+div[data-testid="stCode"] *,
+.stCodeBlock *,
+.stCode * {
+    color: #FFFFFF !important;
+}
+
+/* Data editor active cells should use white edit box */
+div[data-testid="stDataEditor"] input,
+div[data-testid="stDataEditor"] textarea,
+div[data-testid="stDataEditor"] [contenteditable="true"] {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+    caret-color: #000000 !important;
+    border: 1px solid #B19CD9 !important;
+}
+
 /* Input boxes and text areas */
 input, textarea, [data-baseweb="input"] {
     background-color: #1A1A1A !important;
@@ -234,6 +273,20 @@ button[data-testid="stWidgetLabel"] svg,
 [data-testid="stForm"] {
     background-color: #000000 !important;
     border: 1px solid #333333 !important;
+}
+
+/* Expanders (e.g. training output container) */
+div[data-testid="stExpander"],
+div[data-testid="stExpander"] > div,
+div[data-testid="stExpander"] details,
+div[data-testid="stExpander"] summary {
+    background-color: #000000 !important;
+    color: #FFFFFF !important;
+    border-color: #333333 !important;
+}
+
+div[data-testid="stExpander"] * {
+    color: #FFFFFF !important;
 }
 
 /* File uploader */

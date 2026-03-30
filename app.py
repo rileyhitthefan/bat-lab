@@ -18,6 +18,10 @@ import streamlit as st
 import pandas as pd
 import time
 from pathlib import Path
+import io
+import contextlib
+import shutil
+import sys
 
 from src.ml.classify_app import classify_uploaded_files
 from src.ml.config import Config
@@ -26,6 +30,10 @@ from src.db.connection import (
     save_detectors,
     save_species,
     save_training_data,
+    update_call_library_data,
+    delete_detectors,
+    delete_species,
+    delete_call_library_data,
     load_detectors_from_db,
     load_species_from_db,
     load_training_records_df,
@@ -73,60 +81,6 @@ def inject_css(filename: str) -> None:
     if path.exists():
         st.markdown(f"<style>\n{path.read_text(encoding='utf-8')}\n</style>", unsafe_allow_html=True)
 
-
-# Optional display names for species (manifest only has "label" = abbreviation)
-SPECIES_DISPLAY_NAMES: dict[str, tuple[str, str]] = {
-    "TAPMAU": ("Taphozous mauritianus", "Mauritian Tomb Bat"),
-    "TADAEG": ("Tadarida aegyptiaca", "Egyptian Free-tailed Bat"),
-    "OTOMAR": ("Otomops martiensseni", "Large-eared Free-tailed Bat"),
-    "SCODIN": ("Scotophilus dinganii", "African Yellow Bat"),
-    "MINNAT": ("Miniopterus natalensis", "Natal Long-fingered Bat"),
-    "NEOCAP": ("Neoromicia capensis", "Cape Serotine Bat"),
-    "MYOTRI": ("Myotis tricolor", "Temminck's Myotis"),
-    "NYCTHE": ("Nycteris thebaica", "Egyptian Slit-faced Bat"),
-    "RHICAP": ("Rhinolophus capensis", "Cape Horseshoe Bat"),
-    "EPTHOT": ("Eptesicus hotentottus", "Long-tailed Serotine Bat"),
-    "LAEBOT": ("Laephotis botswanae", "Botswana Long-eared Bat"),
-    "SCOVIR": ("Scotophilus viridis", "Greenish Yellow Bat"),
-}
-
-
-def load_species_from_manifest(project_root: Path, config_path: Path | None = None) -> list[dict] | None:
-    """
-    Load species list from the data manifest (filepath, label, location).
-    Tries project_root / config.manifest_csv, then project_root / scripts / data_manifest.csv.
-    Returns list of {Abbreviation, Latin Name, Common Name}, or None if no manifest found/empty.
-    """
-    config_path = config_path or (project_root / "configs" / "default.yaml")
-    if not config_path.exists():
-        return None
-    cfg = Config.from_yaml(config_path)
-    
-    manifest_path = project_root / cfg.manifest_csv
-    if not manifest_path.exists():
-        manifest_path = project_root / "scripts" / "data_manifest.csv"
-    if not manifest_path.exists():
-        return None
-    try:
-        df = pd.read_csv(manifest_path)
-        if "label" not in df.columns or df.empty:
-            return None
-        labels = sorted(df["label"].dropna().astype(str).unique())
-        if not labels:
-            return None
-        out = []
-        for abbr in labels:
-            latin, common = SPECIES_DISPLAY_NAMES.get(abbr, ("", ""))
-            out.append({
-                "Abbreviation": abbr,
-                "Latin Name": latin or abbr,
-                "Common Name": common or "",
-            })
-        return out
-    except Exception:
-        return None
-
-
 # Inject base (light) styles
 inject_css("styles.css")
 
@@ -141,9 +95,6 @@ if 'unknown_data' not in st.session_state:
 
 if 'uploaded_files' not in st.session_state:
     st.session_state.uploaded_files = []
-
-if 'training_entries' not in st.session_state:
-    st.session_state.training_entries = []
 
 if 'training_file_bytes' not in st.session_state:
     st.session_state.training_file_bytes = {}  # filename -> bytes (accumulated across submissions)
@@ -174,9 +125,6 @@ if 'file_uploader_key' not in st.session_state:
 
 if 'source_folder' not in st.session_state:
     st.session_state.source_folder = ""
-
-if 'org_result_msg' not in st.session_state:
-    st.session_state.org_result_msg = None
 
 if 'show_id_folder_form' not in st.session_state:
     st.session_state.show_id_folder_form = False
@@ -247,74 +195,6 @@ def process_audio_files(
     return known_df, unknown_df
 
 
-def convert_df_to_csv(df):
-    """Convert a DataFrame to CSV format for download."""
-    return df.to_csv(index=False).encode('utf-8')
-
-
-def organise_files(source_folder, identified_folder, unknown_folder,
-                   known_filenames, unknown_filenames):
-    """
-    Move identified and unknown .wav files from source_folder into the
-    respective destination folders.  Files are MOVED (not copied) so there
-    is no duplication.
-
-    Returns (moved_identified, moved_unknown, errors) as lists of strings.
-    """
-    import os, shutil
-
-    moved_identified = []
-    moved_unknown    = []
-    errors           = []
-
-    # Helper: create folder if it does not exist
-    def ensure_dir(path):
-        try:
-            os.makedirs(path, exist_ok=True)
-            return True
-        except Exception as exc:
-            errors.append(f"Could not create folder '{path}': {exc}")
-            return False
-
-    if not os.path.isdir(source_folder):
-        errors.append(f"Source folder not found: '{source_folder}'")
-        return moved_identified, moved_unknown, errors
-
-    if not ensure_dir(identified_folder):
-        return moved_identified, moved_unknown, errors
-
-    if not ensure_dir(unknown_folder):
-        return moved_identified, moved_unknown, errors
-
-    def move_files(filenames, dest_folder, moved_list):
-        for fname in filenames:
-            src = os.path.join(source_folder, fname)
-            dst = os.path.join(dest_folder, fname)
-
-            if not os.path.isfile(src):
-                # File might already have been moved in a previous run
-                if os.path.isfile(dst):
-                    moved_list.append(f"{fname} (already in destination)")
-                else:
-                    errors.append(f"File not found in source: '{fname}'")
-                continue
-
-            if os.path.abspath(src) == os.path.abspath(dst):
-                moved_list.append(f"{fname} (already in destination)")
-                continue
-
-            try:
-                shutil.move(src, dst)
-                moved_list.append(fname)
-            except Exception as exc:
-                errors.append(f"Could not move '{fname}': {exc}")
-
-    move_files(known_filenames,   identified_folder, moved_identified)
-    move_files(unknown_filenames, unknown_folder,    moved_unknown)
-
-    return moved_identified, moved_unknown, errors
-
-
 # ============================================================================
 # MAIN UI LAYOUT
 # ============================================================================
@@ -382,7 +262,6 @@ with tab1:
                 st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
                 st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
                 st.session_state.uploaded_files = []
-                st.session_state.org_result_msg = None
                 st.session_state.source_folder  = ""
                 st.session_state.show_id_folder_form  = False
                 st.session_state.show_unk_folder_form = False
@@ -786,12 +665,78 @@ with tab2:
     # Show registered detectors
     if st.session_state.detectors:
         st.subheader("Registered Detectors")
-        st.dataframe(
-            pd.DataFrame(st.session_state.detectors),
+        detectors_df = pd.DataFrame(st.session_state.detectors)
+        edited_detectors_df = st.data_editor(
+            detectors_df,
             use_container_width=True,
             hide_index=True,
-            height=400
+            height=400,
+            disabled=["Detector ID"],
+            num_rows="dynamic",
+            key="detectors_editor",
         )
+        if not edited_detectors_df.equals(detectors_df):
+            before_rows = detectors_df.to_dict(orient="records")
+            after_rows = edited_detectors_df.to_dict(orient="records")
+            before_by_id = {
+                str(r.get("Detector ID", "")).strip(): r
+                for r in before_rows
+                if str(r.get("Detector ID", "")).strip()
+            }
+            after_by_id = {
+                str(r.get("Detector ID", "")).strip(): r
+                for r in after_rows
+                if str(r.get("Detector ID", "")).strip()
+            }
+
+            deleted_ids = [det_id for det_id in before_by_id if det_id not in after_by_id]
+            added_rows = []
+            for det_id, after in after_by_id.items():
+                if det_id in before_by_id:
+                    continue
+                added_rows.append(
+                    {
+                        "Detector": det_id,
+                        "Latitude": after.get("Latitude", ""),
+                        "Longitude": after.get("Longitude", ""),
+                    }
+                )
+            changed_rows = []
+            for det_id, before in before_by_id.items():
+                if det_id not in after_by_id:
+                    continue
+                after = after_by_id[det_id]
+                if str(before.get("Latitude", "")) != str(after.get("Latitude", "")) or str(
+                    before.get("Longitude", "")
+                ) != str(after.get("Longitude", "")):
+                    changed_rows.append(
+                        {
+                            "Detector": det_id,
+                            "Latitude": after.get("Latitude", ""),
+                            "Longitude": after.get("Longitude", ""),
+                        }
+                    )
+
+            db_errors = []
+            if deleted_ids:
+                db_errors.extend(delete_detectors(deleted_ids))
+            if added_rows:
+                db_errors.extend(save_detectors(added_rows))
+            if changed_rows:
+                db_errors.extend(save_detectors(changed_rows))
+
+            if db_errors:
+                for msg in db_errors:
+                    st.error(f"Database error (detector edit): {msg}")
+            else:
+                if deleted_ids:
+                    st.success(f"Deleted {len(deleted_ids)} detector row(s).")
+                if added_rows:
+                    st.success(f"Added {len(added_rows)} detector row(s).")
+                if changed_rows:
+                    st.success(f"Saved {len(changed_rows)} detector edit(s).")
+                st.session_state.detectors = edited_detectors_df.to_dict(orient="records")
+                st.rerun()
     else:
         st.info("No detectors registered yet. Add your first detector above!")
 
@@ -884,12 +829,63 @@ with tab3:
         # Show an empty table with expected columns so new species appear
         species_df = pd.DataFrame(columns=["Abbreviation", "Latin Name", "Common Name"])
 
-    st.dataframe(
+    edited_species_df = st.data_editor(
         species_df,
         use_container_width=True,
         hide_index=True,
-        height=400
+        height=400,
+        disabled=["Abbreviation"],
+        num_rows="dynamic",
+        key="species_editor",
     )
+    if not edited_species_df.equals(species_df):
+        before_rows = species_df.to_dict(orient="records")
+        after_rows = edited_species_df.to_dict(orient="records")
+        before_by_abbr = {
+            str(r.get("Abbreviation", "")).strip(): r
+            for r in before_rows
+            if str(r.get("Abbreviation", "")).strip()
+        }
+        after_by_abbr = {
+            str(r.get("Abbreviation", "")).strip(): r
+            for r in after_rows
+            if str(r.get("Abbreviation", "")).strip()
+        }
+
+        deleted_abbr = [abbr for abbr in before_by_abbr if abbr not in after_by_abbr]
+        changed_rows = []
+        for abbr, before in before_by_abbr.items():
+            if abbr not in after_by_abbr:
+                continue
+            after = after_by_abbr[abbr]
+            if (
+                str(before.get("Latin Name", "")) != str(after.get("Latin Name", ""))
+                or str(before.get("Common Name", "")) != str(after.get("Common Name", ""))
+            ):
+                changed_rows.append(
+                    {
+                        "Abbreviation": abbr,
+                        "LatinName": after.get("Latin Name", ""),
+                        "CommonName": after.get("Common Name", ""),
+                    }
+                )
+
+        db_errors = []
+        if deleted_abbr:
+            db_errors.extend(delete_species(deleted_abbr))
+        if changed_rows:
+            db_errors.extend(save_species(changed_rows))
+
+        if db_errors:
+            for msg in db_errors:
+                st.error(f"Database error (species edit): {msg}")
+        else:
+            if deleted_abbr:
+                st.success(f"Deleted {len(deleted_abbr)} species row(s).")
+            if changed_rows:
+                st.success(f"Saved {len(changed_rows)} species edit(s).")
+            st.session_state.species = edited_species_df.to_dict(orient="records")
+            st.rerun()
 
 # ============================================================================
 # TAB 4: ADD TRAINING DATA
@@ -993,7 +989,6 @@ with tab4:
                 "FileCount": len(training_files),
                 "FileNames": new_file_names,
             }
-            st.session_state.training_entries.append(entry)
 
             # Persist to Call_Library (save_training_data)
             db_entries = [
@@ -1041,12 +1036,79 @@ with tab4:
                 }
             )
         )
-        st.dataframe(
+        edited_summary_df = st.data_editor(
             summary_df,
             use_container_width=True,
             hide_index=True,
             height=400,
+            disabled=["Files"],
+            num_rows="dynamic",
+            key="training_data_editor",
         )
+        if not edited_summary_df.equals(summary_df):
+            before_rows = summary_df.to_dict(orient="records")
+            after_rows = edited_summary_df.to_dict(orient="records")
+            before_by_key = {
+                (
+                    str(r.get("Species", "")).strip(),
+                    str(r.get("Detector", "")).strip(),
+                ): r
+                for r in before_rows
+                if str(r.get("Species", "")).strip() and str(r.get("Detector", "")).strip()
+            }
+            after_keys = {
+                (
+                    str(r.get("Species", "")).strip(),
+                    str(r.get("Detector", "")).strip(),
+                )
+                for r in after_rows
+                if str(r.get("Species", "")).strip() and str(r.get("Detector", "")).strip()
+            }
+
+            updates = []
+            for before, after in zip(before_rows, after_rows):
+                old_species = str(before.get("Species", "")).strip()
+                old_detector = str(before.get("Detector", "")).strip()
+                new_species = str(after.get("Species", "")).strip()
+                new_detector = str(after.get("Detector", "")).strip()
+                file_count = before.get("Files", 0)
+                if old_species != new_species or old_detector != new_detector:
+                    updates.append(
+                        {
+                            "old_species": old_species,
+                            "new_species": new_species,
+                            "old_detector": old_detector,
+                            "new_detector": new_detector,
+                            "file_count": int(file_count),
+                        }
+                    )
+
+            deletions = []
+            for (species, detector), row in before_by_key.items():
+                if (species, detector) not in after_keys:
+                    deletions.append(
+                        {
+                            "species": species,
+                            "detector": detector,
+                            "file_count": int(row.get("Files", 0) or 0),
+                        }
+                    )
+
+            db_errors = []
+            if deletions:
+                db_errors.extend(delete_call_library_data(deletions))
+            if updates:
+                db_errors.extend(update_call_library_data(updates))
+
+            if db_errors:
+                for msg in db_errors:
+                    st.error(f"Database error (training data edit): {msg}")
+            else:
+                if deletions:
+                    st.success(f"Deleted {len(deletions)} training-data row(s).")
+                if updates:
+                    st.success(f"Saved {len(updates)} training-data edit(s).")
+                st.rerun()
     else:
         st.info("No training data entries found in the database yet.")
 
@@ -1066,6 +1128,88 @@ with tab5:
     elif not st.session_state.species:
         st.info("No species registered yet. Please add species in the 'Add Species' tab first.")
     else:
+        if "last_subset_training_job" not in st.session_state:
+            st.session_state.last_subset_training_job = None
+        if "last_subset_training_log" not in st.session_state:
+            st.session_state.last_subset_training_log = None
+
+        # ------------------------------------------------------------------
+        # 1) Manage subset models
+        # ------------------------------------------------------------------
+        project_root = Path(__file__).resolve().parent
+        local_models_dir = project_root / "model_checkpoints" / "local"
+        local_models_dir.mkdir(parents=True, exist_ok=True)
+
+        st.subheader("Manage subset models")
+        subset_rows = []
+        for subdir in sorted(local_models_dir.iterdir()):
+            if not subdir.is_dir():
+                continue
+            pt = subdir / f"{subdir.name}.pt"
+            if not pt.exists():
+                continue
+            meta = subdir / f"{subdir.name}_metadata.json"
+            created_at = ""
+            num_examples = ""
+            if meta.exists():
+                try:
+                    import json
+
+                    payload = json.loads(meta.read_text(encoding="utf-8") or "{}")
+                    created_at = str(payload.get("created_at", "") or "")
+                    num_examples = str(payload.get("num_examples", "") or "")
+                except Exception:
+                    pass
+            subset_rows.append(
+                {
+                    "Model": subdir.name,
+                    "Created": created_at,
+                    "Examples": num_examples,
+                    "Path": str(pt),
+                }
+            )
+
+        subset_df = pd.DataFrame(subset_rows) if subset_rows else pd.DataFrame(
+            columns=["Model", "Created", "Examples", "Path"]
+        )
+        edited_subset_df = st.data_editor(
+            subset_df,
+            use_container_width=True,
+            hide_index=True,
+            disabled=["Model", "Created", "Examples", "Path"],
+            num_rows="dynamic",
+            key="subset_models_editor",
+        )
+
+        if subset_rows and not edited_subset_df.equals(subset_df):
+            before_models = [str(m).strip() for m in subset_df["Model"].tolist()]
+            after_models = set(str(m).strip() for m in edited_subset_df.get("Model", []).tolist())
+            deleted_models = [m for m in before_models if m and m not in after_models]
+
+            if deleted_models:
+                errors = []
+                for model_name in deleted_models:
+                    try:
+                        shutil.rmtree(local_models_dir / model_name)
+                    except Exception as exc:
+                        errors.append(f"Failed to delete `{model_name}`: {exc}")
+
+                if errors:
+                    for msg in errors:
+                        st.error(msg)
+                else:
+                    st.success(f"Deleted {len(deleted_models)} subset model(s).")
+                    st.rerun()
+
+        if not subset_rows:
+            st.info("No subset models found under `model_checkpoints/local/` yet.")
+
+        st.markdown("---")
+
+        # ------------------------------------------------------------------
+        # 2) Choose subset training data (existing setup)
+        # ------------------------------------------------------------------
+        st.subheader("Choose subset training data")
         st.markdown("Select one or more detectors and the species you want to include in the new model training run.")
         st.markdown("---")
 
@@ -1154,6 +1298,15 @@ with tab5:
 
         st.markdown("---")
 
+        manual_model_name = st.text_input(
+            "Optional model name",
+            placeholder="e.g. tcu_subset_march",
+            help="Letters/numbers/underscore/dash only. If it already exists, a timestamp is appended.",
+            key="subset_model_manual_name",
+        )
+
+        st.markdown("---")
+
         # Universal Train Model button at the bottom; greyed out until at least
         # one detector and one species are selected
         can_train = bool(
@@ -1168,7 +1321,58 @@ with tab5:
             disabled=not can_train,
         )
 
+        # Show the last-run result near the Train button/output (not in Manage models).
+        if st.session_state.last_subset_training_job:
+            job = st.session_state.last_subset_training_job
+            st.success(
+                "Last subset model training complete.\n\n"
+                f"- Model name: `{job.get('model_name')}`\n"
+                f"- Examples used: {job.get('num_examples')}\n"
+                f"- Subset model saved to: `{job.get('output_model_path')}`\n"
+                f"- Metadata: `{job.get('metadata_path')}`"
+            )
+
         if clicked and can_train:
+            log_buf = io.StringIO()
+
+            class _StreamToCode:
+                def __init__(self, buf: io.StringIO, placeholder, max_chars: int = 25000):
+                    self.buf = buf
+                    self.placeholder = placeholder
+                    self.max_chars = max_chars
+                    self._last_len = 0
+
+                def write(self, s):
+                    if not s:
+                        return 0
+                    self.buf.write(s)
+                    # Update UI on newlines or sizable chunks
+                    cur = self.buf.getvalue()
+                    if "\n" in s or (len(cur) - self._last_len) > 400:
+                        tail = cur[-self.max_chars :]
+                        self.placeholder.code(tail, language="text")
+                        self._last_len = len(cur)
+                    return len(s)
+
+                def flush(self):
+                    cur = self.buf.getvalue()
+                    tail = cur[-self.max_chars :]
+                    self.placeholder.code(tail, language="text")
+                    self._last_len = len(cur)
+
+            output_placeholder = None
+            # Always show (collapsed by default) after user clicks Train.
+            with st.expander("Training output", expanded=False):
+                output_placeholder = st.empty()
+                # Seed with last run log if present
+                if st.session_state.last_subset_training_log:
+                    output_placeholder.code(
+                        str(st.session_state.last_subset_training_log)[-25000:],
+                        language="text",
+                    )
+
+            stream = _StreamToCode(log_buf, output_placeholder) if output_placeholder else log_buf
+
             with st.spinner("Training model. This may take several minutes..."):
                 try:
                     # Build per-detector selection structure expected by subset trainer.
@@ -1194,19 +1398,34 @@ with tab5:
                         )
                     else:
                         call_df = get_call_library_data()
-                        job = create_subset_model_from_ui_selection(
-                            conn=None,
-                            train_selections=train_selections,
-                            base_model_path=base_model_path,
-                            call_library_df=call_df,
-                        )
+                        with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):
+                            job = create_subset_model_from_ui_selection(
+                                conn=None,
+                                train_selections=train_selections,
+                                base_model_path=base_model_path,
+                                call_library_df=call_df,
+                                model_name=manual_model_name,
+                            )
+                        if hasattr(stream, "flush"):
+                            stream.flush()
 
-                        st.success(
-                            "Subset model training complete.\n\n"
-                            f"- Model name: `{job.model_name}`\n"
-                            f"- Examples used: {job.num_examples}\n"
-                            f"- Subset model saved to: `{job.output_model_path}`\n"
-                            f"- Metadata: `{job.metadata_path}`"
-                        )
+                        st.session_state.last_subset_training_job = {
+                            "model_name": job.model_name,
+                            "num_examples": job.num_examples,
+                            "output_model_path": job.output_model_path,
+                            "metadata_path": job.metadata_path,
+                        }
+                        st.session_state.last_subset_training_log = log_buf.getvalue() or ""
+
+                        # Rerun so the new model shows up in Manage subset models.
+                        st.rerun()
                 except Exception as e:
+                    try:
+                        if output_placeholder is not None:
+                            output_placeholder.code(
+                                (log_buf.getvalue() or "")[-25000:],
+                                language="text",
+                            )
+                    except Exception:
+                        pass
                     st.error(f"Training failed: {e}")

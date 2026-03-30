@@ -1,0 +1,143 @@
+{
+  "model_name": "cave_20260327_110254",
+  "created_at": "2026-03-27T11:05:17.062492",
+  "selected_detectors": [
+    "24F3190166BC0811 (CAVE)"
+  ],
+  "selected_species_by_detector": {
+    "24F3190166BC0811 (CAVE)": [
+      "NYCTHE",
+      "RHICAP"
+    ]
+  },
+  "num_examples": 25,
+  "base_model_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\model_checkpoints\\colab\\best_model.pt",
+  "output_model_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\model_checkpoints\\local\\cave_20260327_110254\\cave_20260327_110254.pt",
+  "files": [
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "NYCTHE",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\1.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "NYCTHE",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\2.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "NYCTHE",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\3.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "NYCTHE",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\4.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "NYCTHE",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\5.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "NYCTHE",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\6.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "NYCTHE",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\7.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "NYCTHE",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\8.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\9.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\10.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\11.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\12.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\13.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\14.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\15.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\16.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\17.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\18.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\19.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\20.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\21.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\22.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\23.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\24.wav"
+    },
+    {
+      "detector_id": "24F3190166BC0811 (CAVE)",
+      "species_code": "RHICAP",
+      "file_path": "C:\\Users\\bi020\\Documents\\tcu\\tcu-ds\\tcu4\\senior-design\\bat-lab\\data\\db_call_library\\25.wav"
+    }
+  ]
+}

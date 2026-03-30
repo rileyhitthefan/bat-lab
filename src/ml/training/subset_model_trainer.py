@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -307,6 +307,33 @@ def make_model_name(detector_species_map: Dict[str, List[str]]) -> str:
     return f"subset_model_{det_count}det_{species_count}sp_{timestamp}"
 
 
+def sanitize_model_name(raw: str) -> str:
+    """Sanitize user-provided model name for folder/file usage."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    allowed = []
+    for ch in raw:
+        if ch.isalnum() or ch in ("_", "-"):
+            allowed.append(ch)
+        elif ch.isspace():
+            allowed.append("_")
+    name = "".join(allowed).strip("_-")
+    return name[:96]
+
+
+def ensure_unique_model_name(model_name: str) -> str:
+    """If model folder exists, append timestamp to avoid collisions."""
+    model_name = sanitize_model_name(model_name)
+    if not model_name:
+        return model_name
+    candidate = model_name
+    if (MODELS_DIR / candidate).exists():
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        candidate = f"{candidate}_{ts}"
+    return candidate
+
+
 def save_training_metadata(
     model_name: str,
     detector_species_map: Dict[str, List[str]],
@@ -343,6 +370,7 @@ def create_subset_model_from_ui_selection(
     base_model_path: str,
     conn=None,
     call_library_df=None,
+    model_name: Optional[str] = None,
 ) -> SubsetTrainingJob:
     """
     Main function your Streamlit UI should call.
@@ -394,7 +422,10 @@ def create_subset_model_from_ui_selection(
         raise ValueError(message)
 
     label_map = build_label_map(examples)
-    model_name = make_model_name(detector_species_map)
+    if model_name:
+        model_name = ensure_unique_model_name(model_name)
+    if not model_name:
+        model_name = make_model_name(detector_species_map)
 
     # Save under model_checkpoints/local/<model_name>/<model_name>.pt
     subset_dir = MODELS_DIR / model_name

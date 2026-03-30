@@ -11,10 +11,14 @@ from src.db.connection import (
     load_training_records_df,
     load_detectors_from_db,
     load_species_from_db,
+    delete_detectors,
+    delete_species,
+    delete_call_library_data,
     save_call_library_entries,
     save_detectors,
     save_species,
     save_training_data,
+    update_call_library_data,
 )
 
 __all__ = [
@@ -24,8 +28,12 @@ __all__ = [
     "load_training_records_df",
     "save_detectors",
     "save_species",
+    "delete_detectors",
+    "delete_species",
+    "delete_call_library_data",
     "save_call_library_entries",
     "save_training_data",
+    "update_call_library_data",
     "load_detectors_from_db",
     "load_species_from_db",
 ]
