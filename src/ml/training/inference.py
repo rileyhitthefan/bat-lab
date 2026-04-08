@@ -23,7 +23,11 @@ import librosa
 from ..models.net import BatClassifier
 from ..data.spectrograms import cache_mel_full, cache_mel_call, cache_mel
 from ..data.audio import extract_single_call_window
-from ..data.features import compute_numeric_features_from_y
+from ..data.features import (
+    compute_numeric_features_from_y,
+    compute_call_measurements,
+    parse_date_time_from_filename,
+)
 
 
 def _cfg_to_dict(cfg) -> dict:
@@ -230,6 +234,8 @@ def predict_file(
     y_full, sr = librosa.load(wav_path, sr=sr, mono=mono)
     y_call, _ = extract_single_call_window(y_full, sr, min_freq=fmin, max_freq=fmax)
     num_feats = compute_numeric_features_from_y(y_call, sr, cfg_dict)
+    measurements = compute_call_measurements(y_call, sr, cfg_dict)
+    date_str, time_str = parse_date_time_from_filename(wav_path)
     expected_dim = meta["numeric_feat_dim"]
     if len(num_feats) != expected_dim:
         # Checkpoint may have been trained with fewer features (e.g. 8 before pulse-timing was added)
@@ -258,7 +264,10 @@ def predict_file(
     # Debug: print predicted index alongside species label
     print(f"[BatLab] Predicted class index: {top_idx}, label: {top_label}, prob={p:.4f}")
 
+
     min_conf = get_min_conf(thresholds, top_label, location, default_min_conf)
+    auto_id = top_label if p >= min_conf else "UNKNOWN"
+
     return {
         "label": top_label,
         "prob": p,
@@ -266,4 +275,16 @@ def predict_file(
         "is_unknown": p < min_conf,
         "min_conf": min_conf,
         "top2": top2,
+
+        # export fields
+        "file_name": os.path.basename(wav_path),
+        "date": date_str,
+        "time": time_str,
+        "auto_id": auto_id,
+        "matching": round(p * 100.0, 2),
+        "Fc": measurements["Fc"],
+        "Dur": measurements["Dur"],
+        "Fmin": measurements["Fmin"],
+        "Fmax": measurements["Fmax"],
+        "Sc": measurements["Sc"],
     }
