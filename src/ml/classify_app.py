@@ -97,7 +97,7 @@ def classify_uploaded_files(
     model_path: str | Path | None = None,
     config_path: str | Path | None = None,
     thresholds_path: str | Path | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Classify uploaded audio files using the trained ML model (same pipeline as MLModel2).
 
@@ -112,7 +112,11 @@ def classify_uploaded_files(
         thresholds_path: Path to thresholds YAML. Default: from config thresholds_yaml
 
     Returns:
-        (known_df, unknown_df) with columns Filename, Species Prediction, Confidence Level.
+        (known_df, unknown_df, export_df).
+
+        - known_df columns: Filename, Species Prediction, Confidence Level
+        - unknown_df columns: Filename
+        - export_df columns: see EXPORT_COLUMNS (for CSV export)
     """
     if not uploaded_files:
         return _empty_results()
@@ -276,6 +280,7 @@ def classify_uploaded_files(
     # Debug summary to terminal
     known_df = pd.DataFrame(known_results)
     unknown_df = pd.DataFrame(unknown_results)
+    export_df = pd.DataFrame(export_results, columns=EXPORT_COLUMNS)
     print("[BatLab] --- classification summary ---")
     print(f"[BatLab] identified: {len(known_df)} | unknown: {len(unknown_df)}")
     if not known_df.empty:
@@ -284,4 +289,4 @@ def classify_uploaded_files(
         print("Unknown:", list(unknown_df["Filename"]))
     print("[BatLab] ------------------------------")
 
-    return known_df, unknown_df
+    return known_df, unknown_df, export_df
