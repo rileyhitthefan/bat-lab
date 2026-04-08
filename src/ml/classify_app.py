@@ -14,11 +14,25 @@ from .config import Config, ensure_dirs
 from .utils.device import get_device
 from .training.inference import predict_file
 
+EXPORT_COLUMNS = [
+    "IN FILE",
+    "DATE",
+    "TIME",
+    "AUTO ID*",
+    "MATCHING",
+    "Fc",
+    "Dur",
+    "Fmax",
+    "Fmin",
+    "SC",
+]
+
 
 def _empty_results():
     return (
         pd.DataFrame(columns=["Filename", "Species Prediction", "Confidence Level"]),
         pd.DataFrame(columns=["Filename"]),
+        pd.DataFrame(columns=EXPORT_COLUMNS),
     )
 
 
@@ -138,9 +152,25 @@ def classify_uploaded_files(
         # No trained model: return all uploads as unknown (no placeholder data)
         print(f"[BatLab] Model not found at {model_path}; all {len(uploaded_files)} file(s) marked unknown.")
         unknown = [{"Filename": f.name} for f in uploaded_files]
+        export_rows = [
+            {
+                "IN FILE": f.name,
+                "DATE": "",
+                "TIME": "",
+                "AUTO ID*": "UNKNOWN",
+                "MATCHING": "",
+                "Fc": "",
+                "Dur": "",
+                "Fmax": "",
+                "Fmin": "",
+                "SC": "",
+            }
+            for f in uploaded_files
+        ]
         return (
             pd.DataFrame(columns=["Filename", "Species Prediction", "Confidence Level"]),
             pd.DataFrame(unknown),
+            pd.DataFrame(export_rows, columns=EXPORT_COLUMNS),
         )
 
     print(f"[BatLab] Classifying {len(uploaded_files)} file(s) with model {model_path}")
@@ -149,6 +179,7 @@ def classify_uploaded_files(
 
     known_results = []
     unknown_results = []
+    export_results = []
 
     with tempfile.TemporaryDirectory(prefix="batlab_upload_") as tmpdir:
         root_dir = str(Path(tmpdir).resolve())
@@ -166,6 +197,18 @@ def classify_uploaded_files(
             if not filename.lower().endswith(".wav"):
                 print(f"[BatLab] {filename}: skipped (not .wav)")
                 unknown_results.append({"Filename": filename})
+                export_results.append({
+                    "IN FILE": filename,
+                    "DATE": "",
+                    "TIME": "",
+                    "AUTO ID*": "UNKNOWN",
+                    "MATCHING": "",
+                    "Fc": "",
+                    "Dur": "",
+                    "Fmax": "",
+                    "Fmin": "",
+                    "SC": "",
+                })
                 continue
 
             wav_path = tmpdir_path / filename
@@ -187,11 +230,35 @@ def classify_uploaded_files(
             except Exception as e:
                 print(f"[BatLab] {filename}: ERROR - {e}")
                 unknown_results.append({"Filename": filename})
+                export_results.append({
+                    "IN FILE": filename,
+                    "DATE": "",
+                    "TIME": "",
+                    "AUTO ID*": "UNKNOWN",
+                    "MATCHING": "",
+                    "Fc": "",
+                    "Dur": "",
+                    "Fmax": "",
+                    "Fmin": "",
+                    "SC": "",
+                })
                 continue
 
             prob_pct = f"{out['prob'] * 100:.2f}%"
             top2 = out.get("top2", [])
             top2_str = " | ".join(f"{l}={p*100:.1f}%" for l, p in top2) if top2 else ""
+            export_results.append({
+                "IN FILE": out["file_name"],
+                "DATE": out["date"],
+                "TIME": out["time"],
+                "AUTO ID*": out["auto_id"],
+                "MATCHING": out["matching"],
+                "Fc": round(out["Fc"], 3) if pd.notna(out["Fc"]) else "",
+                "Dur": round(out["Dur"], 3) if pd.notna(out["Dur"]) else "",
+                "Fmax": round(out["Fmax"], 3) if pd.notna(out["Fmax"]) else "",
+                "Fmin": round(out["Fmin"], 3) if pd.notna(out["Fmin"]) else "",
+                "SC": round(out["Sc"], 6) if pd.notna(out["Sc"]) else "",
+            })
             if out["is_unknown"]:
                 print(f"[BatLab] {filename}: unknown (top prob={out['prob']:.3f} < min_conf={out['min_conf']:.3f})")
                 print(f"[BatLab]   top2: {top2_str}")

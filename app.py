@@ -93,6 +93,12 @@ if 'known_data' not in st.session_state:
 if 'unknown_data' not in st.session_state:
     st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
 
+if 'export_data' not in st.session_state:
+    st.session_state.export_data = pd.DataFrame(columns=[
+        "IN FILE", "DATE", "TIME", "AUTO ID*", "MATCHING",
+        "Fc", "Dur", "Fmax", "Fmin", "SC"
+    ])
+
 if 'uploaded_files' not in st.session_state:
     st.session_state.uploaded_files = []
 
@@ -143,7 +149,6 @@ if 'unk_folder_result' not in st.session_state:
 # HELPER FUNCTIONS
 # ============================================================================
 
-
 def _file_like_from_disk(source_folder: str, filename: str):
     """Build a file-like object (with .name and .getvalue()) for classify_uploaded_files."""
     path = Path(source_folder) / filename
@@ -161,6 +166,11 @@ def _file_like_from_disk(source_folder: str, filename: str):
     return FileLike(filename, path)
 
 
+def convert_df_to_csv(df: pd.DataFrame) -> bytes:
+    """Convert dataframe to CSV bytes for Streamlit download."""
+    return df.to_csv(index=False).encode("utf-8")
+
+
 def process_audio_files(
     source_folder: str,
     wav_filenames: list[str],
@@ -168,8 +178,7 @@ def process_audio_files(
 ):
     """
     Classify .wav files from the given folder using the ML model (classify_app).
-    model_path: optional path to .pt checkpoint; if None, classify_app uses its default.
-    Returns (known_df, unknown_df) with columns Filename, Species Prediction, Confidence Level.
+    Returns (known_df, unknown_df, export_df).
     """
     file_objects = []
     missing_or_skipped = []
@@ -184,7 +193,10 @@ def process_audio_files(
         else:
             missing_or_skipped.append({"Filename": fn})
 
-    known_df, unknown_df = classify_uploaded_files(file_objects, model_path=model_path)
+    known_df, unknown_df, export_df = classify_uploaded_files(
+        file_objects,
+        model_path=model_path
+    )
 
     if missing_or_skipped:
         unknown_df = pd.concat(
@@ -192,7 +204,7 @@ def process_audio_files(
             ignore_index=True,
         )
 
-    return known_df, unknown_df
+    return known_df, unknown_df, export_df
 
 
 # ============================================================================
@@ -204,22 +216,22 @@ def process_audio_files(
 # ============================================================================
 if not st.session_state.logged_in:
     st.markdown("<br><br><br>", unsafe_allow_html=True)
-    
+
     col1, col2, col3 = st.columns([1, 2, 1])
-    
+
     with col2:
         # Display BatLab logo
         st.image("batlablogo.PNG", use_container_width=True)
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("<h2 style='text-align: center; color: #000000; font-weight: bold;'>Please Login</h2>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
-        
+
         with st.form("login_form"):
             username = st.text_input("Username", placeholder="Enter your username")
             password = st.text_input("Password", type="password", placeholder="Enter your password")
-            
+
             login_button = st.form_submit_button("Login", use_container_width=True)
-            
+
             if login_button:
                 if username == "admin" and password == "password":
                     st.session_state.logged_in = True
@@ -228,7 +240,7 @@ if not st.session_state.logged_in:
                     st.rerun()
                 else:
                     st.error("Invalid login credentials. Please try again.")
-    
+
     st.stop()
 
 
@@ -255,17 +267,25 @@ with tab1:
     st.header("Classify Bat Acoustic Calls")
 
     # ── Start New Session ────────────────────────────────────────────────────
-    if not st.session_state.known_data.empty or not st.session_state.unknown_data.empty:
+    if (
+        not st.session_state.known_data.empty
+        or not st.session_state.unknown_data.empty
+        or not st.session_state.export_data.empty
+    ):
         col1, col2 = st.columns([3, 1])
         with col2:
             if st.button("**Start New Session**", use_container_width=True, key="btn_start_new_session"):
                 st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
                 st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
+                st.session_state.export_data = pd.DataFrame(columns=[
+                    "IN FILE", "DATE", "TIME", "AUTO ID*", "MATCHING",
+                    "Fc", "Dur", "Fmax", "Fmin", "SC"
+                ])
                 st.session_state.uploaded_files = []
-                st.session_state.source_folder  = ""
-                st.session_state.show_id_folder_form  = False
+                st.session_state.source_folder = ""
+                st.session_state.show_id_folder_form = False
                 st.session_state.show_unk_folder_form = False
-                st.session_state.id_folder_result  = None
+                st.session_state.id_folder_result = None
                 st.session_state.unk_folder_result = None
                 st.session_state.file_uploader_key += 1
                 st.success("✅ Session reset! Ready for new files.")
@@ -273,7 +293,7 @@ with tab1:
 
     st.markdown("---")
 
-    # ── STEP 1: Model Selector ─────────────────────────────────────────────────────
+    # ── STEP 1: Model Selector ───────────────────────────────────────────────
     st.markdown("### Step 1 — Select a Model")
     model_options = get_available_models()
     if model_options:
@@ -293,7 +313,7 @@ with tab1:
         )
 
     st.markdown("---")
-    
+
     # ── STEP 2: Source folder path ───────────────────────────────────────────
     st.markdown("### Step 2 — Enter the source folder path")
 
@@ -329,6 +349,10 @@ with tab1:
                         st.session_state.uploaded_files = wav_files
                         st.session_state.known_data = pd.DataFrame(columns=['Filename', 'Species Prediction', 'Confidence Level'])
                         st.session_state.unknown_data = pd.DataFrame(columns=['Filename'])
+                        st.session_state.export_data = pd.DataFrame(columns=[
+                            "IN FILE", "DATE", "TIME", "AUTO ID*", "MATCHING",
+                            "Fc", "Dur", "Fmax", "Fmin", "SC"
+                        ])
                         st.session_state.id_folder_result = None
                         st.session_state.unk_folder_result = None
                         st.success(f"✅ Found {len(wav_files)} .wav file(s) in '{normalised}'.")
@@ -355,7 +379,7 @@ with tab1:
 
         if submitted and not classify_disabled:
             with st.spinner("Analyzing audio files… Please wait."):
-                known_df, unknown_df = process_audio_files(
+                known_df, unknown_df, export_df = process_audio_files(
                     st.session_state.source_folder,
                     st.session_state.uploaded_files,
                     model_path=selected_model_path,
@@ -369,6 +393,11 @@ with tab1:
                     st.session_state.unknown_data = pd.concat(
                         [st.session_state.unknown_data, unknown_df], ignore_index=True
                     )
+                if not export_df.empty:
+                    st.session_state.export_data = pd.concat(
+                        [st.session_state.export_data, export_df], ignore_index=True
+                    )
+
             st.success(f"✅ Classification complete! Processed {len(st.session_state.uploaded_files)} file(s).")
             st.rerun()
 
@@ -574,6 +603,29 @@ with tab1:
             if res["failed"]:
                 st.warning("The following files could not be moved:\n" +
                            "\n".join(f"• {f}" for f in res["failed"]))
+
+    st.markdown("---")
+
+    # ── RESULTS CSV EXPORT ───────────────────────────────────────────────────
+    if not st.session_state.export_data.empty:
+        st.subheader("📄 Classification Results CSV")
+
+        st.dataframe(
+            st.session_state.export_data,
+            use_container_width=True,
+            hide_index=True,
+            height=350
+        )
+
+        csv_bytes = convert_df_to_csv(st.session_state.export_data)
+        st.download_button(
+            label="Download Classification Results CSV",
+            data=csv_bytes,
+            file_name="batlab_classification_results.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_results_csv"
+        )
 
     st.markdown("---")
 
@@ -1119,7 +1171,7 @@ with tab5:
     st.markdown("---")
     st.header("Train New Model")
     st.markdown("---")
-    
+
     # Precompute list of detector IDs (may be empty)
     all_detector_ids = [d["Detector ID"] for d in st.session_state.detectors]
 
