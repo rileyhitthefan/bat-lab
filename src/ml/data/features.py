@@ -1,5 +1,7 @@
 import json
 import os
+import re
+from pathlib import Path
 from typing import Union
 
 import librosa
@@ -188,3 +190,116 @@ def compute_feature_stats(
         json.dump({"mean": scaler.mean_.tolist(), "std": scaler.scale_.tolist()}, f, indent=2)
 
     return scaler.mean_, scaler.scale_
+
+def parse_date_time_from_filename(filename: str) -> tuple[str, str]:
+    """
+    Extract date and time from filenames like:
+    24F3190166BC0811_20250530_181400T.WAV
+    00152_TADAEG_TCUBAT-AS_20250626_033753_000.wav
+
+    Returns:
+        (date_str, time_str)
+        date_str -> YYYY-MM-DD
+        time_str -> HH:MM:SS
+    """
+    name = Path(filename).name
+
+    m = re.search(r"(\d{8})_(\d{6})", name)
+    if not m:
+        return "", ""
+
+    date_raw, time_raw = m.group(1), m.group(2)
+    date_str = f"{date_raw[0:4]}-{date_raw[4:6]}-{date_raw[6:8]}"
+    time_str = f"{time_raw[0:2]}:{time_raw[2:4]}:{time_raw[4:6]}"
+    return date_str, time_str
+
+
+def compute_call_measurements(y: np.ndarray, sr: int, cfg: dict) -> dict:
+    """
+    Compute export measurements for one extracted call window.
+
+    Returns:
+        Fc   -> dominant / brightest frequency in kHz
+        Dur  -> duration in ms
+        Fmin -> minimum active frequency in kHz
+        Fmax -> maximum active frequency in kHz
+        Sc   -> approximate slope in kHz/ms
+    """
+    n_fft = cfg["n_fft"]
+    hop = cfg["hop_length"]
+    fmin_cfg = cfg["fmin"]
+    fmax_cfg = cfg["fmax"]
+
+    if y is None or len(y) == 0:
+        return {
+            "Fc": np.nan,
+            "Dur": np.nan,
+            "Fmin": np.nan,
+            "Fmax": np.nan,
+            "Sc": np.nan,
+        }
+
+    duration_ms = (len(y) / float(sr)) * 1000.0
+
+    S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop))
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    times_ms = librosa.frames_to_time(
+        np.arange(S.shape[1]), sr=sr, hop_length=hop, n_fft=n_fft
+    ) * 1000.0
+
+    band_mask = (freqs >= fmin_cfg) & (freqs <= fmax_cfg)
+    if np.any(band_mask):
+        S = S[band_mask, :]
+        freqs = freqs[band_mask]
+
+    if S.size == 0:
+        return {
+            "Fc": np.nan,
+            "Dur": duration_ms,
+            "Fmin": np.nan,
+            "Fmax": np.nan,
+            "Sc": np.nan,
+        }
+
+    power = S ** 2
+    mean_spec = power.mean(axis=1)
+
+    fc_hz = float(freqs[int(np.argmax(mean_spec))])
+
+    global_peak = float(np.max(power))
+    thr = max(global_peak * 0.20, 1e-12)
+    active = power >= thr
+
+    active_rows = np.where(active.any(axis=1))[0]
+    if len(active_rows) > 0:
+        fmin_hz = float(freqs[active_rows[0]])
+        fmax_hz = float(freqs[active_rows[-1]])
+    else:
+        fmin_hz = np.nan
+        fmax_hz = np.nan
+
+    ridge_freqs = []
+    ridge_times = []
+    for t in range(power.shape[1]):
+        col = power[:, t]
+        if np.max(col) >= thr:
+            ridge_idx = int(np.argmax(col))
+            ridge_freqs.append(freqs[ridge_idx] / 1000.0)
+            ridge_times.append(times_ms[t])
+
+    if len(ridge_times) >= 2:
+        try:
+            slope, _ = np.polyfit(ridge_times, ridge_freqs, 1)
+            sc_val = float(slope)
+        except Exception:
+            sc_val = np.nan
+    else:
+        sc_val = np.nan
+
+    return {
+        "Fc": fc_hz / 1000.0,
+        "Dur": duration_ms,
+        "Fmin": fmin_hz / 1000.0 if not np.isnan(fmin_hz) else np.nan,
+        "Fmax": fmax_hz / 1000.0 if not np.isnan(fmax_hz) else np.nan,
+        "Sc": sc_val,
+    }
