@@ -39,6 +39,7 @@ from src.db.connection import (
     load_training_records_df,
 )
 from src.ml.training.subset_model_trainer import create_subset_model_from_ui_selection
+from src.ml.training.full_model_trainer import retrain_full_model_from_ui
 
 # ============================================================================
 # MODEL DISCOVERY (for Classify tab dropdown)
@@ -1184,6 +1185,10 @@ with tab5:
             st.session_state.last_subset_training_job = None
         if "last_subset_training_log" not in st.session_state:
             st.session_state.last_subset_training_log = None
+        if "last_full_training_job" not in st.session_state:
+            st.session_state.last_full_training_job = None
+        if "last_full_training_log" not in st.session_state:
+            st.session_state.last_full_training_log = None
 
         # ------------------------------------------------------------------
         # 1) Manage subset models
@@ -1259,7 +1264,115 @@ with tab5:
         st.markdown("---")
 
         # ------------------------------------------------------------------
-        # 2) Choose subset training data (existing setup)
+        # 2) Retrain full / large model
+        # ------------------------------------------------------------------
+        st.subheader("Retrain full model")
+        st.markdown(
+            "Use all available training data in the database to retrain the large base model."
+        )
+
+        full_model_name = st.text_input(
+            "Optional full model name",
+            placeholder="e.g. full_model_april",
+            help="Leave blank to use a timestamped default name.",
+            key="full_model_manual_name",
+        )
+
+        retrain_full_clicked = st.button(
+            "Retrain Full Model",
+            use_container_width=True,
+            type="secondary",
+            key="btn_retrain_full_model",
+        )
+
+        if st.session_state.last_full_training_job:
+            job = st.session_state.last_full_training_job
+            st.success(
+                "Last full model training complete.\n\n"
+                f"- Model name: `{job.get('model_name')}`\n"
+                f"- Examples used: {job.get('num_examples')}`\n"
+                f"- Full model saved to: `{job.get('output_model_path')}`\n"
+                f"- Metadata: `{job.get('metadata_path')}`"
+            )
+
+        if retrain_full_clicked:
+            full_log_buf = io.StringIO()
+
+            class _FullStreamToCode:
+                def __init__(self, buf: io.StringIO, placeholder, max_chars: int = 25000):
+                    self.buf = buf
+                    self.placeholder = placeholder
+                    self.max_chars = max_chars
+                    self._last_len = 0
+
+                def write(self, s):
+                    if not s:
+                        return 0
+                    self.buf.write(s)
+                    cur = self.buf.getvalue()
+                    if "\n" in s or (len(cur) - self._last_len) > 400:
+                        tail = cur[-self.max_chars:]
+                        self.placeholder.code(tail, language="text")
+                        self._last_len = len(cur)
+                    return len(s)
+
+                def flush(self):
+                    cur = self.buf.getvalue()
+                    tail = cur[-self.max_chars:]
+                    self.placeholder.code(tail, language="text")
+                    self._last_len = len(cur)
+
+            full_output_placeholder = None
+            with st.expander("Full model training output", expanded=False):
+                full_output_placeholder = st.empty()
+                if st.session_state.last_full_training_log:
+                    full_output_placeholder.code(
+                        str(st.session_state.last_full_training_log)[-25000:],
+                        language="text",
+                    )
+
+            full_stream = _FullStreamToCode(full_log_buf, full_output_placeholder) if full_output_placeholder else full_log_buf
+
+            with st.spinner("Retraining full model. This may take several minutes..."):
+                try:
+                    project_root = Path(__file__).resolve().parent
+                    call_df = get_call_library_data()
+
+                    with contextlib.redirect_stdout(full_stream), contextlib.redirect_stderr(full_stream):
+                        job = retrain_full_model_from_ui(
+                            conn=None,
+                            call_library_df=call_df,
+                            model_name=full_model_name,
+                        )
+
+                    if hasattr(full_stream, "flush"):
+                        full_stream.flush()
+
+                    st.session_state.last_full_training_job = {
+                        "model_name": job.model_name,
+                        "num_examples": job.num_examples,
+                        "output_model_path": job.output_model_path,
+                        "metadata_path": job.metadata_path,
+                    }
+                    st.session_state.last_full_training_log = full_log_buf.getvalue() or ""
+
+                    st.rerun()
+
+                except Exception as e:
+                    try:
+                        if full_output_placeholder is not None:
+                            full_output_placeholder.code(
+                                (full_log_buf.getvalue() or "")[-25000:],
+                                language="text",
+                            )
+                    except Exception:
+                        pass
+                    st.error(f"Full model training failed: {e}")
+
+        st.markdown("---")
+
+        # ------------------------------------------------------------------
+        # 3) Choose subset training data (existing setup)
         # ------------------------------------------------------------------
         st.subheader("Choose subset training data")
         st.markdown("Select one or more detectors and the species you want to include in the new model training run.")
