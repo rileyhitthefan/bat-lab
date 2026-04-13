@@ -24,7 +24,8 @@ def retrain_full_model_from_ui(conn=None, call_library_df=None, model_name: str 
     Right now this just copies the current base model into a timestamped file
     so the UI flow works end-to-end.
     """
-    project_root = Path(__file__).resolve().parents[2]
+    # File is at src/ml/training/, so repo root is 3 levels up.
+    project_root = Path(__file__).resolve().parents[3]
     cfg = Config.from_yaml(project_root / "configs" / "default.yaml")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

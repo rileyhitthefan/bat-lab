@@ -48,6 +48,8 @@ from src.ml.training.full_model_trainer import retrain_full_model_from_ui
 def get_available_models() -> list[tuple[str, str]]:
     """
     Return list of (display_label, model_path_str) for the Classify tab:
+    Priority order:
+    - Full retrained models under model_checkpoints/full_retrained/<name>/<name>.pt
     - Colab (base) model at model_checkpoints/colab/best_model.pt
     - All subset models under model_checkpoints/local/<name>/<name>.pt
     """
@@ -56,10 +58,32 @@ def get_available_models() -> list[tuple[str, str]]:
     base = project_root / cfg.model_dir
     options: list[tuple[str, str]] = []
 
+    # 1) Full retrained models (priority)
+    full_dir = base / "full_retrained"
+    if full_dir.is_dir():
+        full_entries: list[tuple[float, str, str]] = []
+        for subdir in full_dir.iterdir():
+            if not subdir.is_dir():
+                continue
+            pt = subdir / f"{subdir.name}.pt"
+            if not pt.exists():
+                continue
+            try:
+                sort_key = pt.stat().st_mtime
+            except Exception:
+                sort_key = 0.0
+            full_entries.append((sort_key, subdir.name, str(pt)))
+
+        # Newest first
+        for _mtime, name, path_str in sorted(full_entries, key=lambda t: t[0], reverse=True):
+            options.append((f"Full retrained: {name}", path_str))
+
+    # 2) Colab base model
     colab_pt = base / "colab" / "best_model.pt"
     if colab_pt.exists():
         options.append(("Colab (base model)", str(colab_pt)))
 
+    # 3) Subset models
     local_dir = base / "local"
     if local_dir.is_dir():
         for subdir in sorted(local_dir.iterdir()):
@@ -1470,16 +1494,14 @@ with tab5:
             key="subset_model_manual_name",
         )
 
-        st.markdown("---")
-
-        # Universal Train Model button at the bottom; greyed out until at least
-        # one detector and one species are selected
+        # Greyed out until at least one detector and one species are selected
         can_train = bool(
             st.session_state.train_selected_detectors
             and st.session_state.train_selected_species
         )
-        clicked = st.button(
-            "Train Model",
+
+        subset_train_clicked = st.button(
+            "Train Subset Model",
             use_container_width=True,
             type="primary",
             key="btn_train_model_global",
@@ -1497,7 +1519,7 @@ with tab5:
                 f"- Metadata: `{job.get('metadata_path')}`"
             )
 
-        if clicked and can_train:
+        if subset_train_clicked and can_train:
             log_buf = io.StringIO()
 
             class _StreamToCode:
@@ -1551,17 +1573,44 @@ with tab5:
                         chosen_for_det = sorted({sp for sp in selected_species if sp in available})
                         train_selections[det_id] = {"selected": True, "species": chosen_for_det}
 
-                    # Base model for fine-tuning: model_checkpoints/colab/best_model.pt
-                    # Subset model is saved to model_checkpoints/local/<subset_name>.pt
+                    # Base model for fine-tuning:
+                    #   1) newest full retrained model: model_checkpoints/full_retrained/<name>/<name>.pt
+                    #   2) fallback colab base: model_checkpoints/colab/best_model.pt
+                    # Subset model is saved to model_checkpoints/local/<subset_name>/<subset_name>.pt
                     project_root = Path(__file__).resolve().parent
                     cfg = Config.from_yaml(project_root / "configs" / "default.yaml")
-                    base_model_path = str(project_root / cfg.model_dir / "colab" / "best_model.pt")
-                    if not Path(base_model_path).exists():
+                    model_base_dir = project_root / cfg.model_dir
+                    colab_base_model = model_base_dir / "colab" / "best_model.pt"
+
+                    # Prefer latest full_retrained checkpoint if available.
+                    full_dir = model_base_dir / "full_retrained"
+                    full_candidates: list[Path] = []
+                    if full_dir.is_dir():
+                        for subdir in full_dir.iterdir():
+                            if not subdir.is_dir():
+                                continue
+                            pt = subdir / f"{subdir.name}.pt"
+                            if pt.exists():
+                                full_candidates.append(pt)
+
+                    base_model_pt: Path | None = None
+                    if full_candidates:
+                        try:
+                            base_model_pt = max(full_candidates, key=lambda p: p.stat().st_mtime)
+                        except Exception:
+                            base_model_pt = full_candidates[-1]
+                    elif colab_base_model.exists():
+                        base_model_pt = colab_base_model
+
+                    if base_model_pt is None or not base_model_pt.exists():
                         st.error(
-                            f"Base model not found at {base_model_path}. "
-                            "Ensure model_checkpoints/colab/best_model.pt exists for subset training."
+                            "No base model found for subset training. "
+                            "Expected either:\n"
+                            "- `model_checkpoints/full_retrained/<name>/<name>.pt` (preferred)\n"
+                            "- `model_checkpoints/colab/best_model.pt` (fallback)"
                         )
                     else:
+                        base_model_path = str(base_model_pt)
                         call_df = get_call_library_data()
                         with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):
                             job = create_subset_model_from_ui_selection(
