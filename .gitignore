@@ -24,5 +24,5 @@ cache_numfeats/
 data/
 training_calls/
 index.html
-model_checkpoints/full_retrained/*
-model_checkpoints/local/*
+model_checkpoints/full_retrained/
+model_checkpoints/local/
