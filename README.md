@@ -2,8 +2,8 @@
 
 Detect and classify bat echolocation calls and identify behavioral sequences.
 
-- **Demo:** https://drive.google.com/file/d/1GSTknpda1oaCgl3L0ylzwszFyxQ6K8qM/view?usp=sharing
-- **User Manual:** https://drive.google.com/drive/folders/10A_5EJbl0U-VE_eGgLaygLFI4HIdAO14?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto
+- **Demo:** [Recorded demo](https://drive.google.com/file/d/1aUGNsBtNq8T85Wq3CNfmgZRjgOIpO2Qs/view?usp=sharing)
+- **User Manual:** [Step-by-step manual for users](https://drive.google.com/drive/folders/10A_5EJbl0U-VE_eGgLaygLFI4HIdAO14?dmr=1&ec=wgc-drive-%5Bmodule%5D-goto)
 
 ## Features
 
